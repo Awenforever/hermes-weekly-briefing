@@ -138,10 +138,11 @@ python3 gen_pdf_weasy.py
 from weasyprint import HTML
 import os
 
-output_dir = "/home/vive/Work/Hermes/2026-07-15-wildfire-smoke-detection"
+output_dir = os.path.expanduser("~/Work/Hermes/YYYY-MM-DD-briefing-title")
 week_number = "27"
 title = f"Weekly Academic Paper Briefing - Week {week_number}, 2026"
 pdf_path = os.path.join(output_dir, f"briefing_week{week_number}.pdf")
+os.makedirs(output_dir, exist_ok=True)
 
 html_content = f"""
 <!DOCTYPE html>
@@ -211,7 +212,7 @@ pip install fpdf2
 from fpdf import FPDF
 import os
 
-output_dir = "/home/vive/Work/Hermes/2026-07-15-wildfire-smoke-detection"
+output_dir = os.path.expanduser("~/Work/Hermes/YYYY-MM-DD-briefing-title")
 week_number = "27"
 pdf = FPDF(orientation='P', unit='mm', format='A4')
 pdf.add_font('NotoSansCJK', '', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', uni=True)
