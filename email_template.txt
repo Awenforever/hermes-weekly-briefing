@@ -1,102 +1,33 @@
 ================================================================================
-                    学术研究周报 — 遥感多光谱烟雾检测前沿
-                      2026年第27周 (6.29 - 7.5)
+                    学术研究周报 — [研究主题]
+                      2026年第[周]周 ([日期范围])
 ================================================================================
 
-[本期焦点] Transformer架构持续渗透烟雾检测领域，多光谱波段选择策略受关注，
-轻量化模型与边缘部署成为新趋势，检测→反演的桥接研究开始涌现。
+[本期焦点] 本期重点发现与趋势总结...
 
 
-━━━━━━━━━━━━━ 本期精选5篇论文 ━━━━━━━━━━━━━
+━━━━━━━━━━━━━ 本期精选论文 ━━━━━━━━━━━━━
 
-[1] 基于Transformer增强UNet的多光谱Landsat影像复杂背景烟雾分割
+[1] [论文中文标题]
 
-    Original: "A transformer boosted UNet for smoke segmentation in complex
-    backgrounds in multispectral LandSat imagery"
-    Authors: Liang Zhao, Jixue Liu, Stefan Peters, Jiuyong Li (Univ. of South Australia)
-    Published: Remote Sensing Applications: Society and Environment, 2024
-    DOI: https://doi.org/10.1016/j.rsase.2024.101152
-    arXiv: https://arxiv.org/abs/2406.13105
+    Original: "[英文标题]"
+    Authors: [作者列表] (Affiliation)
+    Published: [期刊/会议], Year
+    DOI: https://doi.org/...
 
-    VTrUNet提出虚拟通道构建模块(Virtual Band Construction)来扩展光谱特征，
-    结合Vision Transformer自注意力机制捕捉长程上下文关系。在Landsat 6波段
-    (RGB+NIR+SWIR1+SWIR2)数据上，F1较Smoke-UNet/GFUNet/MA-UNet提升>4%。
-    可有效检测薄烟、云雾遮挡、不同颜色烟雾等复杂场景。
+    [论文简介/关键发现]
 
 
-[2] 卫星影像多注意力交错网络用于早期野火烟雾检测
+━━━━━━━━━━━━━━━ 趋势判断 ━━━━━━━━━━━━━
 
-    Original: "Satellite Image-Based Surveillance and Early Wildfire Smoke
-    Detection Using a Multiattention Interlaced Network"
-    Published: IEEE Trans. on Industrial Informatics, 2025
-    DOI: https://doi.org/10.1109/tii.2025.3528549
-
-    将ViT与CNN交错融合，引入多注意力机制。模型仅0.7M参数、0.2 GFLOPs，
-    适合IoT/边缘设备部署。在USTC_SmokeRS上误报降低6%，可检测占图像面积
-    仅2%的微小烟雾，在云、雾、暴风雪等恶劣大气条件下表现突出。
+1. [趋势一]
+2. [趋势二]
 
 
-[3] 多尺度CNN-Transformer混合网络用于卫星影像烟雾检测
+━━━━━━━━━━━━━ 下周关注方向 ━━━━━━━━━━━
 
-    Original: "Multi-Scale Hybrid CNN-Transformer for Smoke Detection in
-    Satellite Images"
-    Published: ICCV Workshops, 2025
-    DOI: https://doi.org/10.1109/iccvw69036.2025.00305
-
-    在每个CNN层后级联Transformer以提取多尺度特征，顶层额外追加Transformer
-    层捕捉跨感受野的全局关系。在USTC_SmokeRS数据集上超越现有方法。
-    核心贡献：验证了"CNN浅层+Transformer深层"的层级混合策略优于纯CNN或纯ViT。
-
-
-[4] Land8Fire：人工标注多光谱野火分割数据集与全面基准测试
-
-    Original: "Land8Fire: A Complete Study on Wildfire Segmentation Through
-    Comprehensive Review, Human-Annotated Multispectral Dataset, and
-    Extensive Benchmarking"
-    Published: Remote Sensing (MDPI), 2025, 17(16), 2776
-    DOI: https://doi.org/10.3390/rs17162776
-
-    构建20,000+人工标注Landsat 8图像块的数据集。系统对比UNet/DeepLabV3+/
-    SegFormer/Mask2Former及不同损失函数(CE vs Focal Loss)。关键发现：
-    B5+B6+B7 (NIR+SWIR1+SWIR2) 波段组合最优（F1=96.99%），SWIR波段
-    对穿透烟雾和云层识别火点至关重要。为后续烟雾检测研究提供权威基准。
-
-
-[5] 基于细粒度背景识别的改进马氏距离烟雾检测方法
-
-    Original: "An Improved Mahalanobis Distance Method for Smoke Detection
-    Based on Fine-Grained Background Identification"
-    Published: IEEE Trans. on Geoscience and Remote Sensing, 2026 (Early Access)
-    DOI: https://doi.org/10.1109/tgrs.2026.3668811
-
-    将传统物理模型(Mahalanobis距离)与细粒度背景识别策略结合，实现跨平台
-    (MODIS/Sentinel/Landsat)烟雾检测。突破纯DL黑盒框架，为后续烟雾物理参数
-    反演（光学厚度估算、浓度定量）奠定方法论基础。2026年最新发表。
-
-
-━━━━━━━━━━━━━ 趋势判断 ━━━━━━━━━━━━━
-
-1. 多光谱波段选择策略>全波段堆砌：Land8Fire和Sen2Fire均证实，精选SWIR+NIR
-   波段比使用全部波段效果更好，这对你的USTC_SmokeRS架构设计有指导意义。
-
-2. Transformer+CNN混合架构成为主流范式：纯CNN或纯ViT都不如混合策略，
-   但融合方式(parallel/serial/interlaced)尚无定论，值得探索。
-
-3. 轻量化与边缘部署是落地关键：多注意力交错网络(0.7M params)证明小模型
-   可以同时保持高精度，这对实际林火预警系统意义重大。
-
-4. 检测→反演的桥接开始出现：改进马氏距离方法展示了物理模型与DL的结合路径。
-   如果你要从detection延伸到retrieval，这是一个值得跟进的切入点。
-
-5. USTC_SmokeRS数据集被广泛使用：多篇论文都将其作为基准，说明该数据集
-   已成为该领域的标准测试平台，具有持续影响力。
-
-
-━━━━━━━━━━━ 下周关注方向 ━━━━━━━━━
-
-- 关注IGARSS 2025 (8月) 的相关论文
-- 阅读Land8Fire的完整论文，参考其基准测试方法设计你的对比实验
-- 考察"检测+反演"联合模型的最新进展
+- [关注点一]
+- [关注点二]
 
 ================================================================================
-附件PDF包含详细分析、方法对比表、参数统计、配图说明，请查收。
+附件 PDF 包含详细分析，请查收。
