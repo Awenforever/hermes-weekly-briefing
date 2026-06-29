@@ -9,6 +9,23 @@ version: 1.0.0
 Three-tier semantic research profile evolution: daily digest → weekly synthesis → monthly trajectory analysis.
 
 ## Architecture
+
+### §0 初始化向导（首次加载时执行）
+
+Hermes 加载此 skill 后，向用户确认以下配置：
+
+> 我已经准备好三层研究画像演化系统。确认以下设置：
+> 1. **Daily Digest**：每天 23:55 分析当天对话（写入 `/opt/data/research-profile/daily/`）
+> 2. **Weekly Synthesis**：每周日 00:30 跨天合成（更新研究画像 memory）
+> 3. **Monthly Trajectory**：每月 1 日 01:00 长期轨迹分析
+> 4. 存储目录：`/opt/data/research-profile/`（首次自动创建）
+> 
+> 要我现在为你创建这三个 cron job 吗？（回复"全部"即可）
+
+用户确认后，使用 `cronjob` 工具创建三个 cron，参考下方 "Cron Job Setup" 中的 prompt。
+
+### Architecture
+
 ```
 Daily (23:55)  →  /opt/data/research-profile/daily/YYYY-MM-DD.md
 Weekly (Sun 00:30) →  /opt/data/research-profile/weekly/YYYY-Www.md
