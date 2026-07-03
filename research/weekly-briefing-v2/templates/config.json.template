@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "_note": "Replace $DATA_DIR with your data directory path (e.g., ~/.hermes/weekly-briefing/)",
+  "paths": {
+    "skill_dir": "auto",
+    "data_dir": "$DATA_DIR",
+    "handoff_dir": "~/Work/Hermes"
+  },
+  "user": {
+    "display_name": "$YOUR_NAME",
+    "research_identity": "$YOUR_IDENTITY",
+    "one_sentence_profile": "Brief description of your research direction",
+    "language": "zh-CN",
+    "timezone": "Asia/Shanghai"
+  },
+  "research": {
+    "core_keywords": [
+      "multispectral smoke detection",
+      "satellite smoke segmentation",
+      "wildfire smoke remote sensing"
+    ],
+    "method_keywords": [
+      "CNN",
+      "Transformer",
+      "ViT",
+      "UNet",
+      "spectral band analysis"
+    ],
+    "cross_domain_interests": [
+      "physics-guided remote sensing",
+      "lightweight edge deployment",
+      "cross-satellite generalization"
+    ],
+    "required_sections": [
+      "paper_summary",
+      "paper_and_me",
+      "reproducibility",
+      "cross_paper_synthesis",
+      "submission_timeline"
+    ]
+  },
+  "search": {
+    "sources": ["Semantic Scholar", "arXiv", "Exa", "Crossref"],
+    "min_sources_per_run": 2,
+    "fallback_order": ["web_search", "web_extract", "execute_code", "browser"],
+    "lookback_weeks": 3,
+    "citation_spike_threshold_per_week": 15
+  },
+  "selection": {
+    "normal_min": 3,
+    "normal_max": 5,
+    "harvest_max": 8,
+    "dry_week_min": 1,
+    "core_count": 3,
+    "cross_domain_count": 1,
+    "free_exploration_count": 1,
+    "max_overlap_with_previous_week": 2,
+    "baseline_reset_interval_weeks": 4,
+    "full_taxonomy_interval_weeks": 6,
+    "trend_brief_interval_weeks": 12
+  },
+  "style": {
+    "fixed_template": false,
+    "role": ["research assistant", "friend", "mentor"],
+    "allow_variable_mood": true,
+    "signature": "Hermes ᥫᩣ",
+    "email_subject_prefix": "⚚"
+  }
+}
