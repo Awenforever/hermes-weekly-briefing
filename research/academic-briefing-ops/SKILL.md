@@ -119,3 +119,7 @@ mkdir -p /opt/data/weekly-briefing/{papers/candidates,reports,profile/daily,prof
 ## Archive Recovery
 
 使用 `scripts/recover_archive.py` 从 backups 和 manifests 恢复 archive.json 条目。
+
+> ⚠️ **重建版本**：此脚本为 2026-07-03 重建实现，原版已丢失。
+> 已验证：从 recovery bak + backup archive 恢复 2 篇缺失论文 (13→15)。
+> 功能：扫描 `recovery/` bak 文件、`backups/` 历史 archive、`reports/*/manifest.json`。

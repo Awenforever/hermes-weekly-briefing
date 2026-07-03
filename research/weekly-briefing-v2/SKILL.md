@@ -151,7 +151,7 @@ HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1
 
 - **vive (Kelvin J.)**：每次用不同英文形容词修饰，如 "Restless Kelvin J." / "Tenacious Kelvin J."
 - **开篇1-2句中文寒暄**，有人情味，点到即止
-- **落款**：`--- / {限定词} / Hermes ᥫᩣ` 或 `庄奕 ᥫᩣ`，名字后空格加ᥫᩣ，两个名字自由切换
+- **落款**：限定词单独一行，换行后 `Hermes ᥫᩣ` 或 `庄奕 ᥫᩣ`。不要 `---` 分隔线，不要 `/` 符号
 - **情绪可变化**：这周懒就说懒话，激动就撒欢，禁止永远彬彬有礼
 - **主题前缀**：⚚
 
@@ -175,3 +175,7 @@ runner 有时返回 `arxiv_api_candidates: 0`。原因：arXiv API 的 `all:"que
 - PDF失败 → 用WeasyPrint后备，再失败用纯文本邮件
 - 邮件失败 → 保存回执，不滚回本地文件
 - 任一步失败 → 跳过清理，不影响主流程
+
+## 参考文档
+
+- `references/v2-capability-coverage.md` — 2026-07-03 dry-run 验证：全部13项能力覆盖通过
