@@ -23,6 +23,43 @@ related_skills:
 
 在搜索→筛选→分析阶段，遵循 core 的质量控制规则判断论文价值。
 
+## 架构冻结（观察期）
+
+**2026-07-03 起生效，持续 2-3 周至 cron 连续稳定运行。**
+
+刚经历误删 6 个 skill + 恢复后，周报系统进入观察期。硬性约束：
+
+| 允许 | 禁止 |
+|------|------|
+| 修 bug | 合并 skill |
+| 更新 SKILL.md 文档 | 删除任何周报相关 skill |
+| 调整 cron 参数 | 重命名 cron |
+| 数据修复（archive/dedup 等） | 大改入口流程 |
+| | 修改 skill 间职责边界 |
+
+观察期内所有修改先 git commit，再操作。
+
+## 未来合并计划 (v3.1)
+
+观察期结束后规划统一版本：
+
+```
+weekly-briefing-v3.1
+= weekly-briefing-v2 runtime（执行入口）
++ academic-weekly-briefing-core quality framework（评分/anti-bias/关系图谱）
++ academic-report-render-deliver delivery details（渲染/邮件）
++ academic-briefing-ops recovery/maintenance references（运维）
+```
+
+合并流程（6 步，不可跳步）：
+
+1. 打包备份所有涉及 skill（tar.gz 快照）
+2. 创建 v3.1，不删除旧 skill（保留回滚能力）
+3. dry-run 验证 v3.1 完整流程
+4. cron 切换到 v3.1
+5. 观察一周，确认无回归
+6. 清理旧 skill（经用户确认）
+
 ## 核心原则
 
 - **搜索用直接API**：arXiv API + Crossref API，不走 Hermes web_search（会被block）
@@ -34,14 +71,24 @@ related_skills:
 
 ## 执行流程
 
-### 阶段0：前置检查
+**Scripts location:** 所有脚本在本 skill 的 `scripts/` 目录下（`hermes skills install` 会自动拉取）。
+
+## 首次安装初始化
 
 ```bash
-# 确认依赖
+# 1. 创建数据目录
+mkdir -p $HERMES_HOME/weekly-briefing/{papers/candidates,reports,profile/daily,profile/weekly,profile/monthly,teams,logs,exports,indices/quarterly}
+
+# 2. 从模板创建配置（替换 $DATA_DIR 为实际路径）
+cp {skill_dir}/templates/config.json.template $HERMES_HOME/weekly-briefing/config.json
+cp {skill_dir}/templates/venues.json.template $HERMES_HOME/weekly-briefing/venues.json
+# 编辑 config.json：填好 display_name、research_identity、data_dir
+
+# 3. 依赖检查
 which typst && typst --version
 python3 -c "from weasyprint import HTML; print('OK')"
-ls /opt/data/home/.local/bin/agently-cli
 fc-list :lang=zh | head -1
+# agently-cli 需单独安装和 OAuth 认证
 ```
 
 ### 阶段1：论文发现（确定性）
@@ -49,12 +96,13 @@ fc-list :lang=zh | head -1
 运行E2E runner的发现模式：
 
 ```bash
-python3 /opt/data/weekly-briefing/scripts/run_weekly_e2e.py \
+python3 {skill_dir}/scripts/run_weekly_e2e.py \
   --week $(python3 -c "import datetime; y,w,_=datetime.date.today().isocalendar(); print(f'{y}-W{w:02d}')") \
+  --data-dir $DATA_DIR \
   --discovery-only
 ```
 
-这会输出 `selected_papers.json` 到 `/opt/data/weekly-briefing/papers/candidates/{week}_selected.json`。
+这会输出 `selected_papers.json` 到 `$DATA_DIR/papers/candidates/{week}_selected.json`。
 
 如果 runner 返回的论文数少于3篇，额外执行一次宽泛搜索（更换关键词）再跑一次。
 
@@ -78,7 +126,7 @@ python3 /opt/data/weekly-briefing/scripts/run_weekly_e2e.py \
 - 投稿时间线
 - 下周关注
 
-**必须去重**：读 `/opt/data/weekly-briefing/papers/dedup.json`，确保不重复。
+**必须去重**：读 `$DATA_DIR/papers/dedup.json`，确保不重复。
 
 ### 阶段4：PDF生成
 
@@ -97,7 +145,7 @@ python3 /opt/data/weekly-briefing/scripts/run_weekly_e2e.py \
 
 编译：
 ```bash
-cd /opt/data/weekly-briefing/reports/{week}/
+cd $DATA_DIR/reports/{week}/
 typst compile report.typ report.pdf
 ```
 
@@ -111,12 +159,11 @@ typst compile report.typ report.pdf
 # 主题：⚚ 学术研究周报 {week} — {一句话概括}
 # 落款：--- / 限定词 / 庄奕
 
-export PATH="/opt/data/home/.local/bin:$PATH"
-cd /opt/data/weekly-briefing/reports/{week}/
+cd $DATA_DIR/reports/{week}/
 
 # 发送（两阶段确认）
 agently-cli message +send \
-  --to "vive@mail.ustc.edu.cn" \
+  --to "your@email.com" \
   --subject "⚚ ..." \
   --body-file email_body.txt \
   --attachment report.pdf
@@ -130,11 +177,10 @@ agently-cli message +send ... --confirmation-token {token}
 ### 阶段6：数据持久化
 
 更新以下文件：
-- `/opt/data/weekly-briefing/papers/dedup.json` — 追加本期论文
-- `/opt/data/weekly-briefing/papers/archive.json` — 追加本期记录
-- `/opt/data/weekly-briefing/papers/taxonomy.json` — 更新方法标签
-- `/opt/data/weekly-briefing/papers/relations.json` — 更新引用关系
-- `/home/vive/Work/Hermes/.weekly_briefing_dedup.json` — 同步更新
+- `$DATA_DIR/papers/dedup.json` — 追加本期论文
+- `$DATA_DIR/papers/archive.json` — 追加本期记录
+- `$DATA_DIR/papers/taxonomy.json` — 更新方法标签
+- `$DATA_DIR/papers/relations.json` — 更新引用关系
 
 ### 阶段7：清理
 

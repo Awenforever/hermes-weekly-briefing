@@ -18,17 +18,17 @@ related_skills:
 
 ## 路径约定
 
-- **DATA_ROOT**: `/opt/data/weekly-briefing/`
-- **HANDOFF_DIR**: `/home/vive/Work/Hermes`
-- **SCRIPTS_DIR**: `~/.hermes/scripts/`
+- **DATA_ROOT**: config.json 中配置的 `data_dir`（默认为 `$HERMES_HOME/weekly-briefing/`）
+- **SCRIPTS_DIR**: 本 skill 的 `scripts/` 目录（所有脚本随 skill 安装）
 
 ## 维护脚本
 
-| 脚本 | 路径 | 触发 |
+| 脚本 | 位置 | 触发 |
 |------|------|------|
-| `daily_maintenance.py` | `~/.hermes/scripts/` | cron: 每日 03:00（no_agent） |
-| `health_check.py` | `~/.hermes/scripts/` | 手动 / 故障排查 |
-| `recover_archive.py` | 本 skill 的 `scripts/` | 手动 / archive 异常时 |
+| `daily_maintenance.py` | 本 skill `scripts/` | cron: 每日 03:00（no_agent） |
+| `health_check.py` | 本 skill `scripts/` | 手动 / 故障排查 |
+| `recover_archive.py` | 本 skill `scripts/` | 手动 / archive 异常时 |
+| `setup.py` | 本 skill `scripts/` | 首次安装初始化 |
 
 ---
 
@@ -53,14 +53,14 @@ related_skills:
 |------|----------|
 | Typst | `which typst && typst --version` |
 | WeasyPrint | `python3 -c "from weasyprint import HTML"` |
-| agently-cli | `ls /opt/data/home/.local/bin/agently-cli` |
+| agently-cli | `command -v agently-cli` |
 | CJK 字体 | `fc-list :lang=zh` |
 | pdftotext | `which pdftotext` |
 
 ### 数据目录初始化
 
 ```bash
-mkdir -p /opt/data/weekly-briefing/{papers/candidates,reports,profile/daily,profile/weekly,profile/monthly,teams,logs,exports,indices/quarterly}
+mkdir -p $DATA_DIR/{papers/candidates,reports,profile/daily,profile/weekly,profile/monthly,teams,logs,exports,indices/quarterly}
 ```
 
 ---

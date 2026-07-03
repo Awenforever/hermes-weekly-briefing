@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "_note": "Add your conferences and journals. T1=CCF-A/SCI一区, T2=CCF-B/SCI二区, T3=CCF-C/SCI三四区",
+  "venues": [
+    {"name": "CVPR", "type": "conference", "field": "computer vision", "tier": "T1"},
+    {"name": "ICCV", "type": "conference", "field": "computer vision", "tier": "T1"},
+    {"name": "IEEE TGRS", "type": "journal", "field": "remote sensing", "tier": "T1"},
+    {"name": "RSE", "type": "journal", "field": "remote sensing", "tier": "T1"},
+    {"name": "IEEE GRSL", "type": "journal", "field": "remote sensing", "tier": "T2"},
+    {"name": "IGARSS", "type": "conference", "field": "remote sensing", "tier": "T2"}
+  ],
+  "deadline_scan": {
+    "window_days": 30,
+    "last_checked_at": null
+  }
+}
