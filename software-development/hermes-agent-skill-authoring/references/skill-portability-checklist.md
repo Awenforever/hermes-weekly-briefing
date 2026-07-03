@@ -57,3 +57,10 @@
 - [ ] 运行 `health_check.py` 和 `daily_maintenance.py`（验证运维脚本）
 - [ ] 确认所有错误是"首次缺失数据文件"类（`dedup.json not found`），不是"找不到脚本/配置"类
 - [ ] 验证引导流程：新用户按 SKILL.md 初始化步骤能否独立完成设置
+
+## 9. 升级路径
+
+- [ ] README.md 中有"升级"章节，说明 `hermes skills install <URL>` 即升级
+- [ ] 覆盖范围矩阵明确列出：哪些文件被覆盖（skills files），哪些保留（data files）
+- [ ] 升级前后建议运行 `health_check.py`
+- [ ] 说明贡献上游的正确路径（Fork → PR → 合并 → 全员升级）

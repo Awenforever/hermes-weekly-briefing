@@ -715,6 +715,18 @@ def main() -> int:
         candidates = dedup_candidates(candidates)
         url_dedup_count = len(candidates)
 
+        # Cross-week dedup: exclude papers already seen in dedup.json
+        existing_ids = set()
+        for raw_key in dedup.get("papers", {}).keys():
+            # Normalize: canonical_id uses "doi:" prefix, but some entries store bare DOI
+            if not any(raw_key.startswith(p) for p in ("doi:", "arxiv:", "url:", "title:")) and raw_key.startswith("10."):
+                existing_ids.add("doi:" + raw_key)
+            else:
+                existing_ids.add(raw_key)
+        cross_week_deduped = [c for c in candidates if canonical_id(c) not in existing_ids]
+        cross_dedup_removed = len(candidates) - len(cross_week_deduped)
+        candidates = cross_week_deduped
+
         filtered = []
         rejected = []
         for c in candidates:
@@ -733,11 +745,23 @@ def main() -> int:
         stats = {
             "raw_candidates": raw_count,
             "candidate_deduped": url_dedup_count,
+            "cross_week_deduped": cross_dedup_removed,
             "hard_filter_passed": len(filtered),
             "selected_count": len(selected),
             "rejected_count": len(rejected),
             "queries": len(queries),
         }
+
+        # Update dedup.json with newly selected papers for cross-week dedup
+        now_ts = now_iso()
+        for s in selected:
+            dedup.setdefault("papers", {})[canonical_id(s)] = {
+                "first_seen_week": week,
+                "first_seen_at": now_ts,
+                "title": s.get("title", "")[:200],
+            }
+        dedup["updated_at"] = now_ts
+        write_json(PAPERS_DIR / "dedup.json", dedup)
 
         # Discovery-only mode: stop here, output selected papers for LLM deep analysis
         if args.discovery_only:

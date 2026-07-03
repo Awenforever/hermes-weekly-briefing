@@ -94,14 +94,14 @@
     "archived_at": null,
     "created_at": "2026-07-03T16:34:28.389280+00:00",
     "created_by": null,
-    "last_patched_at": "2026-07-03T17:03:57.770783+00:00",
-    "last_used_at": "2026-07-03T17:03:03.763015+00:00",
-    "last_viewed_at": "2026-07-03T17:03:03.757680+00:00",
-    "patch_count": 4,
+    "last_patched_at": "2026-07-03T17:31:59.415629+00:00",
+    "last_used_at": "2026-07-03T18:09:19.244917+00:00",
+    "last_viewed_at": "2026-07-03T18:09:19.243375+00:00",
+    "patch_count": 6,
     "pinned": false,
     "state": "active",
-    "use_count": 3,
-    "view_count": 3
+    "use_count": 9,
+    "view_count": 9
   },
   "ocr-and-documents": {
     "archived_at": null,
