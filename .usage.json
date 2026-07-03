@@ -4,26 +4,39 @@
     "created_at": "2026-07-03T13:57:03.495584+00:00",
     "created_by": null,
     "last_patched_at": "2026-07-03T15:16:20.666197+00:00",
-    "last_used_at": null,
-    "last_viewed_at": null,
+    "last_used_at": "2026-07-03T15:51:02.124083+00:00",
+    "last_viewed_at": "2026-07-03T15:51:02.114937+00:00",
     "patch_count": 4,
     "pinned": false,
     "state": "active",
-    "use_count": 0,
-    "view_count": 0
+    "use_count": 2,
+    "view_count": 2
   },
   "academic-report-render-deliver": {
     "archived_at": null,
     "created_at": "2026-07-03T14:43:41.329957+00:00",
     "created_by": null,
     "last_patched_at": "2026-07-03T14:48:54.607384+00:00",
-    "last_used_at": null,
-    "last_viewed_at": null,
+    "last_used_at": "2026-07-03T15:51:02.132058+00:00",
+    "last_viewed_at": "2026-07-03T15:51:02.129995+00:00",
     "patch_count": 2,
     "pinned": false,
     "state": "active",
-    "use_count": 0,
-    "view_count": 0
+    "use_count": 1,
+    "view_count": 1
+  },
+  "academic-weekly-briefing-core": {
+    "archived_at": null,
+    "created_at": "2026-07-03T15:50:27.280594+00:00",
+    "created_by": null,
+    "last_patched_at": null,
+    "last_used_at": "2026-07-03T15:50:27.282032+00:00",
+    "last_viewed_at": "2026-07-03T15:50:27.280610+00:00",
+    "patch_count": 0,
+    "pinned": false,
+    "state": "active",
+    "use_count": 1,
+    "view_count": 1
   },
   "agently-mail": {
     "archived_at": null,
@@ -69,13 +82,13 @@
     "created_at": "2026-07-02T12:05:55.520289+00:00",
     "created_by": null,
     "last_patched_at": null,
-    "last_used_at": "2026-07-02T13:48:05.653749+00:00",
-    "last_viewed_at": "2026-07-02T13:48:05.648951+00:00",
+    "last_used_at": "2026-07-03T15:28:41.710106+00:00",
+    "last_viewed_at": "2026-07-03T15:28:41.709282+00:00",
     "patch_count": 0,
     "pinned": false,
     "state": "active",
-    "use_count": 2,
-    "view_count": 2
+    "use_count": 5,
+    "view_count": 5
   },
   "ocr-and-documents": {
     "archived_at": null,
@@ -84,6 +97,19 @@
     "last_patched_at": null,
     "last_used_at": "2026-07-02T14:32:04.980067+00:00",
     "last_viewed_at": "2026-07-02T14:32:04.972063+00:00",
+    "patch_count": 0,
+    "pinned": false,
+    "state": "active",
+    "use_count": 1,
+    "view_count": 1
+  },
+  "research-profile-engine": {
+    "archived_at": null,
+    "created_at": "2026-07-03T15:51:02.120849+00:00",
+    "created_by": null,
+    "last_patched_at": null,
+    "last_used_at": "2026-07-03T15:51:02.126968+00:00",
+    "last_viewed_at": "2026-07-03T15:51:02.120864+00:00",
     "patch_count": 0,
     "pinned": false,
     "state": "active",
@@ -121,13 +147,13 @@
     "created_at": "2026-07-03T13:36:51.173911+00:00",
     "created_by": null,
     "last_patched_at": "2026-07-03T15:16:11.165340+00:00",
-    "last_used_at": "2026-07-03T15:15:14.354446+00:00",
-    "last_viewed_at": "2026-07-03T15:15:14.349114+00:00",
+    "last_used_at": "2026-07-03T15:52:44.051414+00:00",
+    "last_viewed_at": "2026-07-03T15:52:44.046611+00:00",
     "patch_count": 14,
     "pinned": false,
     "state": "active",
-    "use_count": 6,
-    "view_count": 5
+    "use_count": 9,
+    "view_count": 8
   },
   "zhuangyi-identity": {
     "archived_at": null,

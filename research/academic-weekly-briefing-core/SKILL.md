@@ -1,18 +1,21 @@
 ---
 name: academic-weekly-briefing-core
-description: 学术研究周报核心编排器：搜索、去重、质量评估、论文选择、作者团队深挖、文献关系图谱、自适应分析、跨论文综合、周报撰写。唯一周报业务逻辑来源，手动/cron 仅通过 mode 区分。
+description: 学术研究周报分析规范与质量控制参考——Venue分级、6因子评分、Anti-Bias、文献关系图谱、自适应分析模板。当前不作为 cron 入口，由 weekly-briefing-v2 在生产中引用。
 version: 3.0.0
 related_skills:
+  - weekly-briefing-v2
   - research-profile-engine
   - academic-report-render-deliver
   - academic-briefing-ops
 ---
 
-# Academic Weekly Briefing Core
+# Academic Weekly Briefing Core — Analysis & Quality Specification
 
-## 单一职责
+**当前角色：分析规范与质量控制参考，不是运行时入口。**
 
-负责一次完整周报生产流程。所有搜索、选择、分析的唯一来源。
+生产周报由 `weekly-briefing-v2` 执行。本 skill 定义判断论文质量的标准，v2 在搜索→筛选→分析阶段引用这些规则。
+
+观察期内冻结架构：不合并、不删除、不重命名。待 2-3 周稳定后再规划 v3.1 统一方案。
 
 ## 核心原则
 

@@ -1,12 +1,27 @@
 ---
 name: weekly-briefing-v2
-description: 学术研究周报（统一版）— 论文搜索发现 + 深度分析 + 精美PDF + 个性化邮件。唯一周报技能，手动和cron通用。
+description: 学术研究周报（统一版）— 论文搜索发现 + 深度分析 + 精美PDF + 个性化邮件。当前唯一生产入口，手动和cron通用。
 version: 2.0.0
+related_skills:
+  - academic-weekly-briefing-core
 ---
 
-# Weekly Briefing v2 — Unified Pipeline
+# Weekly Briefing v2 — Active Production Entrypoint
 
-单一技能，覆盖完整周报流程。cron和手动同一入口，流程完全一致。
+**当前唯一运行时入口。** 所有 cron 和手动触发均通过本 skill。
+
+## 与 academic-weekly-briefing-core 的关系
+
+本 skill 负责**执行**（跑 runner、渲染 PDF、发邮件）。以下分析规范由 `academic-weekly-briefing-core` 定义，除非本 skill 显式覆盖：
+
+- **Venue 质量分级**（T1-T4 + Reject）
+- **6 因子综合评分**（venue×0.30 + citation×0.15 + relevance×0.25 + novelty×0.15 + reproducibility×0.10 + author×0.05）
+- **Anti-Bias 护栏**（topic_feedback 权重边界、话题漂移检测、多样性硬约束）
+- **论文类型自适应分析模板**（方法/数据集/综述/理论/应用）
+- **文献关系图谱**（cites/cited_by/extends/contradicts/complements/supersedes）
+- **季度索引与趋势归纳**
+
+在搜索→筛选→分析阶段，遵循 core 的质量控制规则判断论文价值。
 
 ## 核心原则
 
