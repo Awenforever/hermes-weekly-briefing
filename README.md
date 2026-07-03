@@ -21,7 +21,7 @@ hermes skills install https://github.com/Awenforever/hermes-weekly-briefing
 ## 初始化（安装后执行）
 
 ```bash
-# 1. 设置数据目录
+# 1. 设置数据目录（建议写入 ~/.hermes/.env 持久化）
 export HERMES_WEEKLY_DATA_DIR=~/.hermes/weekly-briefing
 
 # 2. 创建目录结构
@@ -43,6 +43,40 @@ python3 $SKILL_DIR/../academic-briefing-ops/scripts/health_check.py
 # 6. 试跑
 python3 $SKILL_DIR/scripts/run_weekly_e2e.py --discovery-only --max-selected 3
 ```
+
+## 升级
+
+技能更新通过重新安装完成。**数据安全：** `HERMES_WEEKLY_DATA_DIR` 与技能目录完全分离，升级不会覆盖你的配置、论文库或历史周报。
+
+```bash
+# 一行升级（覆盖技能文件，保留数据）
+hermes skills install https://github.com/Awenforever/hermes-weekly-briefing
+
+# 建议：升级后运行健康检查确认无回归
+python3 ~/.hermes/skills/research/academic-briefing-ops/scripts/health_check.py
+```
+
+### 升级覆盖范围
+
+| 内容 | 是否覆盖 | 说明 |
+|------|----------|------|
+| SKILL.md（AI 指令） | ✅ 覆盖 | 新版本的行为规则和流程 |
+| scripts/*.py（运行脚本） | ✅ 覆盖 | 含 runner、维护、恢复脚本 |
+| templates/*.template（配置模板） | ✅ 覆盖 | 新版本可能有新配置项 |
+| references/*.md（参考文档） | ✅ 覆盖 | 陷阱文档、覆盖率报告等 |
+| `$DATA_DIR/config.json` | ❌ 不覆盖 | 用户填写的个人配置 |
+| `$DATA_DIR/papers/`（论文库） | ❌ 不覆盖 | archive、dedup、taxonomy 等 |
+| `$DATA_DIR/reports/`（历史周报） | ❌ 不覆盖 | 过往生成的 PDF 和 markdown |
+| `$DATA_DIR/profile/`（研究画像） | ❌ 不覆盖 | daily/weekly/monthly 画像数据 |
+
+### 如果你修改了技能文件
+
+如果你在本地改了技能脚本，升级会覆盖你的修改。贡献改进的正确路径：
+
+1. Fork 本仓库
+2. 提交你的改进到你的 fork
+3. 发 PR 到源仓库
+4. 合并后所有用户通过 re-install 获得更新
 
 ## 依赖
 
