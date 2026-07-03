@@ -155,7 +155,30 @@ HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1
 - **情绪可变化**：这周懒就说懒话，激动就撒欢，禁止永远彬彬有礼
 - **主题前缀**：⚚
 
+## 铁律
+
+### Git 版本管理
+
+**任何持久化修改前必须先 git commit。** 三个 repo：
+- `/opt/data/skills/` — 技能文件
+- `/opt/data/weekly-briefing/` — 周报数据
+- `/opt/data/home/.hermes/` — 运维脚本
+
+流程：修改 → `git add -A` → `git commit -m "..."` → 再操作。禁止无 commit 的修改。
+
+### 禁止无验证删除 Skill
+
+2026-07-03 教训：批量删除 6 个 skill 后才发现 `recover_archive.py` 永久丢失、cron 指向断裂。删 skill 前必须：
+1. 列出该 skill 的 `scripts/`、`references/` 内容
+2. 确认 cron 不依赖它
+3. 确认功能已迁移或有备份
+4. 先 git commit 当前状态
+
 ## 已知问题与陷阱
+
+### Cron 手动触发可能不执行
+
+`cronjob action=run` 在某些环境下不实际触发 cron。手动跑周报时应**直接走完整流程**（阶段0→6），不要依赖 cron 触发。cron 仅用于定时调度。
 
 ### arXiv API 零结果
 

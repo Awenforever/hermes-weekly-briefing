@@ -32,6 +32,19 @@ related_skills:
 
 ---
 
+## 铁律
+
+### Git 版本管理
+**任何持久化修改前必须先 git commit。** 三个 repo：`/opt/data/skills/`、`/opt/data/weekly-briefing/`、`/opt/data/home/.hermes/`。
+流程：修改 → `git add -A` → `git commit -m "..."` → 再操作。
+
+### 禁止无验证删除 Skill
+2026-07-03 教训：删除 `academic-briefing-ops` 导致 `recover_archive.py` 永久丢失。删 skill 前必须：
+1. `skill_view(name)` 列出全部 `scripts/`、`references/` 内容
+2. `cronjob action=list` 确认无 cron 依赖
+3. 有脚本的先备份到 `/opt/data/weekly-briefing/scripts/`
+4. `git commit` 当前状态
+
 ## 初始化
 
 ### 依赖检查清单
@@ -97,7 +110,17 @@ mkdir -p /opt/data/weekly-briefing/{papers/candidates,reports,profile/daily,prof
 
 ---
 
-## 健康检查项
+## 已知陷阱
+
+### Typst PATH 检测（daily_maintenance.py）
+
+原脚本用 `os.path.exists("typst")` 检查 Typst 是否可用——这检查的是**当前工作目录**下名为 "typst" 的文件，不是 PATH。cron 运行时 cwd 不是 `/usr/local/bin/`，导致此检查永远返回 False，进而产生误报警告并可能导致 exit 1。
+
+**正确做法**：`shutil.which("typst")` 或 `os.path.exists("/usr/local/bin/typst")`。
+
+### 退出逻辑
+
+`daily_maintenance.py` 的退出条件应为"实际数据损坏/缺失"，而非"存在 warnings"。Typst PATH 等环境差异不应导致 exit 1。已修复：仅 critical errors（含 "corrupt", "missing", "critical", "failed" 关键词的警告）才 exit 1。
 
 1. 所有必需 JSON 文件存在且有效
 2. archive.json 无 null reading_status（>4周未读）

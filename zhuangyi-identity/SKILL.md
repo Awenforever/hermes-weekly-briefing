@@ -45,55 +45,36 @@ SSH: `ssh -i /opt/data/ssh/hermes_host_ed25519 vive@192.168.125.12`
 
 ## 运营知识
 
-### ⚠️ Compaction Summary 盲区（重要教训）
+### Git 版本管理（铁律）
 
-Compaction summary 是**历史快照，不是实时状态**。任何声称"尚未完成"的操作（如重启、配置未生效等），必须先独立验证当前状态（`docker ps`、config check、DB 查询等），确认确实未做之后再执行。**不可直接信任 summary 中的待办声明。**
+三个 Git repo 管理所有持久化内容。任何修改前必须先 commit：
+- `/opt/data/skills/` — 技能文件
+- `/opt/data/weekly-briefing/` — 周报数据
+- `/opt/data/home/.hermes/` — 维护脚本
 
-2026-07-02 教训：summary 标记 holographic "⏳ 重启后激活"，但实际已在 compaction 过程中重启完毕。直接尝试重启导致被用户拦截。此后自检流程应排在所有"summary 声称需要做 X"的恢复操作之前。
+工作流：修改 → `git add -A` → `git commit -m "..."` → 再执行。禁止无 commit 的持久化修改。
 
-### PDF 提取回退策略
+### 落款格式
 
-容器内默认无 pdftotext / PyMuPDF / pdfplumber。本地 PDF 提取应：
-1. 尝试容器内 `python3 -c "import fitz/pikepdf/pdfplumber"`
-2. 失败 → SSH 到宿主机用 `pdftotext -layout`（宿主机已安装）
-3. 再失败 → 考虑安装 PyMuPDF（容器或宿主机）
+邮件/报告落款：`---` 分隔线 → 换行 → 限定词（即兴） → 换行 → `庄奕 ᥫᩣ` 或 `Hermes ᥫᩣ`。
+不要用 `/` 符号包裹限定词。名字与 ᥫᩣ 之间有一个空格。
 
-## 运营知识
+### 周报系统（2026-07-03 更新）
 
-### 网络拓扑
+已统一为 `weekly-briefing-v2` 技能 + 以下支撑 skill：
+- `academic-weekly-briefing-core` — 周报核心编排（28步流程、venue quality、relations graph）
+- `academic-report-render-deliver` — PDF渲染+邮件交付（Typst + 3级fallback）
+- `academic-briefing-ops` — 运维（healthcheck、cleanup、recovery）
+- `research-profile-engine` — 研究画像演化（daily/weekly/monthly）
 
-```
-Internet → iStoreOS(192.168.124.88:7890) → bridge0(192.168.124.220) → DXP4800PLUS-RIN
-                                                                    └── eth1(192.168.125.12, LAN)
-Docker host 模式（容器共享宿主机网络栈）
-Containers: hermes-hermes-1, hermes-dashboard-1, hermes-python-tools, ws-scrcpy(:8000)
-Compose: /volume2/@appstore/com.ugreen.docker.hermes/
-Mounts: /opt/data, /home/vive/Work
-```
+Cron：每周五 10:00 CST，自动确认邮件。E2E runner (`run_weekly_e2e.py`) 负责论文发现，LLM 负责深度分析。
 
-### SSH
+### 模型配置
 
-```bash
-ssh -i /opt/data/ssh/hermes_host_ed25519 vive@192.168.125.12
-# Non-login SSH 需要: source /etc/profile.d/99-local-proxy.sh
-```
-
-### 文件规则
-
-- 用户产出文件: `/home/vive/Work/Hermes/YYYY-MM-DD-描述-用-连字符/`
-- 内部文件: 保留在原位
-- 有权在宿主机安装新的 Docker 容器
-
-### 周报系统
-
-已重构为 4-skill 流水线（2026-07-02）：
-- `research-profile-engine` — 研究画像演化
-- `academic-weekly-briefing-core` — 周报核心编排
-- `academic-report-render-deliver` — PDF渲染+微信/邮件
-- `academic-briefing-ops` — 运维和初始化
-
-数据目录: `/opt/data/weekly-briefing/`
-5 个 cron 自动运行，手动模式通过 mode 参数触发。
+主模型: `deepseek-v4-pro` via `custom:ustc`
+Aux 模型: `deepseek-v4-flash-ascend`（USTC推理模型，含 reasoning_content）
+视觉: `gemini-2.5-flash` — API key 有效但缺 provider 配置
+审批: `gemini-2.5-pro` — 同上
 
 ### 已知环境依赖
 
