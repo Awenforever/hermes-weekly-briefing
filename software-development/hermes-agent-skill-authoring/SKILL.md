@@ -138,7 +138,11 @@ Pick the closest existing category. Don't invent new top-level categories casual
 
 ## Portability (for `hermes skills install`)
 
-Before publishing a skill for installation, verify it's self-contained. See `references/skill-portability-checklist.md` for the full 6-point checklist: script containment, path configurability, seed configs, hardcoded-path audit, dependency declaration, and skill-relationship clarity.
+Before publishing a skill for installation, verify it's self-contained. See `references/skill-portability-checklist.md` for the full 8-point checklist covering: script containment, path configurability, seed configs, hardcoded-path audit, dependency declaration, skill-relationship clarity, **privacy audit**, and **isolated environment testing**.
+
+Key lessons from in-the-wild deployment (2026-07-03):
+- Personal info leaks (email, name, signature, research keywords) are the #1 privacy hazard. Every SKILL.md and template must be scanned before publish.
+- Always test in a fresh isolated env with empty data directories — "first-run" errors are expected (missing dedup.json), but "can't find script" or "can't parse config" errors mean the skill isn't portable.
 
 ## Common Pitfalls
 

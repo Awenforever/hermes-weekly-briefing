@@ -103,7 +103,7 @@ Typst 已 bake 进标准镜像，路径 `/usr/local/bin/typst`。
 
 ## 邮件交付
 
-- 使用 agently-cli（`/opt/data/home/.local/bin/agently-cli`）
+- 使用 agently-cli（通过 `command -v agently-cli` 确认安装）
 - 主题前缀：⚚
 - 附件：report.pdf（相对路径，需 cd 到 PDF 所在目录）
 - 落款格式：按 config.json 的 `style.signature` 设置
@@ -113,8 +113,7 @@ Typst 已 bake 进标准镜像，路径 `/usr/local/bin/typst`。
 ### 发送命令（两阶段确认）
 
 ```bash
-export PATH="/opt/data/home/.local/bin:$PATH"
-cd /opt/data/weekly-briefing/reports/{week}/
+cd $DATA_DIR/reports/{week}/
 
 # 第一阶段：发送（获取 confirmation_token）
 agently-cli message +send \
