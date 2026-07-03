@@ -136,6 +136,10 @@ Pick the closest existing category. Don't invent new top-level categories casual
 - **Adding supporting files:** `write_file` to `skills/<category>/<name>/references/<file>.md`, `templates/<file>`, or `scripts/<file>`. `skill_manage(action='write_file')` also works and enforces the references/templates/scripts/assets subdir allowlist.
 - **Always commit** the edit — in-repo skills are source, not runtime state.
 
+## Portability (for `hermes skills install`)
+
+Before publishing a skill for installation, verify it's self-contained. See `references/skill-portability-checklist.md` for the full 6-point checklist: script containment, path configurability, seed configs, hardcoded-path audit, dependency declaration, and skill-relationship clarity.
+
 ## Common Pitfalls
 
 1. **Using `skill_manage(action='create')` for an in-repo skill.** It writes to `~/.hermes/skills/`, not the repo tree. Use `write_file` for in-repo creation.

@@ -155,9 +155,9 @@ typst compile report.typ report.pdf
 
 ```bash
 # 邮件正文：个性化、即兴、有人情味
-# 称呼：vive = adjective + Kelvin J.
+# 称呼：按 config.json 的 style 设置（如 "adjective + Name"）
 # 主题：⚚ 学术研究周报 {week} — {一句话概括}
-# 落款：--- / 限定词 / 庄奕
+# 落款：按 config.json 的 style.signature 设置
 
 cd $DATA_DIR/reports/{week}/
 
@@ -198,7 +198,7 @@ agently-cli message +send ... --confirmation-token {token}
 cronjob action=create \
   schedule="0 10 * * 5" \
   name="weekly-briefing-v2" \
-  prompt="运行 unified weekly briefing 流程：先跑 run_weekly_e2e.py --discovery-only 获取候选论文，然后对每篇做深度分析（作者调研、跨论文综合、个性化撰写），生成Typst PDF，发送邮件到 vive@mail.ustc.edu.cn，更新所有持久化数据。"
+  prompt="运行 unified weekly briefing 流程：先跑 run_weekly_e2e.py --discovery-only 获取候选论文，然后对每篇做深度分析（作者调研、跨论文综合、个性化撰写），生成Typst PDF，发送邮件到 config.json 中配置的邮箱地址，更新所有持久化数据。"
 
 # 环境变量
 HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1
@@ -210,11 +210,12 @@ HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1
 
 ## 邮件个性化规则
 
-- **vive (Kelvin J.)**：每次用不同英文形容词修饰，如 "Restless Kelvin J." / "Tenacious Kelvin J."
+- **称呼**：按 `config.json` → `style.role` 和 `user.display_name` 设置。示例：`adjective + Name`（如 "Restless Kelvin J."）
 - **开篇1-2句中文寒暄**，有人情味，点到即止
-- **落款**：`---` 分隔线 → 换行 → 限定词 → 换行 → `Hermes ᥫᩣ` 或 `庄奕 ᥫᩣ`。不要 `/` 符号
+- **落款**：按 `config.json` → `style.signature` 和 `style.allow_variable_mood` 设置
 - **情绪可变化**：这周懒就说懒话，激动就撒欢，禁止永远彬彬有礼
-- **主题前缀**：⚚
+- **主题前缀**：⚚（可在 config.json 中修改）
+- **称呼和落款风格**参考 config.json 的 `user` 和 `style` 节；每次生成时可即兴变化但保持基本格式一致
 
 ## 铁律
 

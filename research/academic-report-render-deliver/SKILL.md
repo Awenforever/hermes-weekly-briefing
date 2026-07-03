@@ -106,8 +106,8 @@ Typst 已 bake 进标准镜像，路径 `/usr/local/bin/typst`。
 - 使用 agently-cli（`/opt/data/home/.local/bin/agently-cli`）
 - 主题前缀：⚚
 - 附件：report.pdf（相对路径，需 cd 到 PDF 所在目录）
-- 落款格式：`---` 分隔线 → 换行 → 限定词 → 换行 → `庄奕 ᥫᩣ` 或 `Hermes ᥫᩣ`。不要 `/` 符号
-- 称呼：vive = adjective + "Kelvin J."
+- 落款格式：按 config.json 的 `style.signature` 设置
+- 称呼：按 config.json 的 `user.display_name` 和 `style.role` 设置
 - 寒暄/收束语：即兴，有人情味
 
 ### 发送命令（两阶段确认）
@@ -118,7 +118,7 @@ cd /opt/data/weekly-briefing/reports/{week}/
 
 # 第一阶段：发送（获取 confirmation_token）
 agently-cli message +send \
-  --to "vive@mail.ustc.edu.cn" \
+  --to "your@email.com" \
   --subject "⚚ 学术研究周报 {week} — {主题}" \
   --body-file email_body.txt \
   --attachment report.pdf

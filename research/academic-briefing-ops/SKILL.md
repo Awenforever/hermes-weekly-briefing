@@ -137,7 +137,7 @@ mkdir -p $DATA_DIR/{papers/candidates,reports,profile/daily,profile/weekly,profi
 
 ## Obsidian 导出
 
-`/home/vive/Obsidian/Research Briefing/*.md` — 每篇论文一个笔记，含 YAML frontmatter。
+`$DATA_DIR/exports/obsidian/*.md` — 每篇论文一个笔记，含 YAML frontmatter（如启用 Obsidian 导出）。
 
 ## Archive Recovery
 

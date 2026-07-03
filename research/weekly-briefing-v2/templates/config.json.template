@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_note": "Replace $DATA_DIR with your data directory path (e.g., ~/.hermes/weekly-briefing/)",
+  "_note": "Copy this template to $DATA_DIR/config.json and fill in your details. All $PLACEHOLDER values must be replaced.",
   "paths": {
     "skill_dir": "auto",
     "data_dir": "$DATA_DIR",
@@ -8,28 +8,26 @@
   },
   "user": {
     "display_name": "$YOUR_NAME",
-    "research_identity": "$YOUR_IDENTITY",
-    "one_sentence_profile": "Brief description of your research direction",
+    "research_identity": "$YOUR_IDENTITY (e.g., PhD student, Professor, Researcher)",
+    "one_sentence_profile": "$YOUR_RESEARCH (one sentence describing your research direction)",
     "language": "zh-CN",
     "timezone": "Asia/Shanghai"
   },
   "research": {
+    "_comment": "REQUIRED: Replace these with your own research keywords and methods",
     "core_keywords": [
-      "multispectral smoke detection",
-      "satellite smoke segmentation",
-      "wildfire smoke remote sensing"
+      "$YOUR_CORE_KEYWORD_1",
+      "$YOUR_CORE_KEYWORD_2",
+      "$YOUR_CORE_KEYWORD_3"
     ],
     "method_keywords": [
-      "CNN",
-      "Transformer",
-      "ViT",
-      "UNet",
-      "spectral band analysis"
+      "$YOUR_METHOD_1",
+      "$YOUR_METHOD_2",
+      "$YOUR_METHOD_3"
     ],
     "cross_domain_interests": [
-      "physics-guided remote sensing",
-      "lightweight edge deployment",
-      "cross-satellite generalization"
+      "$YOUR_CROSS_DOMAIN_INTEREST_1",
+      "$YOUR_CROSS_DOMAIN_INTEREST_2"
     ],
     "required_sections": [
       "paper_summary",
@@ -63,7 +61,7 @@
     "fixed_template": false,
     "role": ["research assistant", "friend", "mentor"],
     "allow_variable_mood": true,
-    "signature": "Hermes ᥫᩣ",
+    "signature": "$YOUR_SIGNATURE (e.g., YourName or YourAssistantName)",
     "email_subject_prefix": "⚚"
   }
 }
