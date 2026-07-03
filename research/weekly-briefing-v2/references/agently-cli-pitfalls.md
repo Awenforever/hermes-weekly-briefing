@@ -35,6 +35,28 @@ agently-cli 的邮件发送需要两次调用：
 
 设 `HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1` 后 runner 会自动处理两次调用。
 
+## `--body-file` 必须用相对路径
+
+**现象：**
+```
+Error: --body-file must be a relative path, got: "/opt/data/weekly-briefing/reports/2026-W27/email_body.txt"
+```
+
+**原因：**
+`agently-cli message +send` 的 `--body-file` 参数不接受绝对路径，只接受相对路径。`--attachment` 同理。
+
+**正确做法：**
+先 `cd` 到文件所在目录，再用相对路径：
+```bash
+cd /opt/data/weekly-briefing/reports/2026-W27/
+agently-cli message +send --to "vive@mail.ustc.edu.cn" \
+  --subject "..." \
+  --body-file email_body.txt \
+  --attachment report.pdf
+```
+
+**规则：** 调用 `agently-cli message +send` 时，始终先 `cd` 到邮件正文和附件所在目录，使用相对路径传参。
+
 ## 认证过期
 
 如果 `agently-cli +me` 返回非 0，需要重新 OAuth 登录：

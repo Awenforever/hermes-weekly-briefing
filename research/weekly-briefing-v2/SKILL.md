@@ -94,7 +94,7 @@ typst compile report.typ report.pdf
 # 邮件正文：个性化、即兴、有人情味
 # 称呼：vive = adjective + Kelvin J.
 # 主题：⚚ 学术研究周报 {week} — {一句话概括}
-# 落款：--- / {限定词} / 庄奕
+# 落款：--- / 限定词 / 庄奕
 
 export PATH="/opt/data/home/.local/bin:$PATH"
 cd /opt/data/weekly-briefing/reports/{week}/
@@ -151,7 +151,7 @@ HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1
 
 - **vive (Kelvin J.)**：每次用不同英文形容词修饰，如 "Restless Kelvin J." / "Tenacious Kelvin J."
 - **开篇1-2句中文寒暄**，有人情味，点到即止
-- **落款**：限定词单独一行，换行后 `Hermes ᥫᩣ` 或 `庄奕 ᥫᩣ`。不要 `---` 分隔线，不要 `/` 符号
+- **落款**：`---` 分隔线 → 换行 → 限定词 → 换行 → `Hermes ᥫᩣ` 或 `庄奕 ᥫᩣ`。不要 `/` 符号
 - **情绪可变化**：这周懒就说懒话，激动就撒欢，禁止永远彬彬有礼
 - **主题前缀**：⚚
 
@@ -164,6 +164,10 @@ runner 有时返回 `arxiv_api_candidates: 0`。原因：arXiv API 的 `all:"que
 ### agently-cli 输出中混入 stderr
 
 `agently-cli` 的提示文字（如 `tip: ...`）输出到 stderr。管道操作时**不要用 `2>&1`** 将 stderr 合并到 stdout，否则 `json.load()` 会报 `JSONDecodeError: Extra data`。正确做法：只用 stdout，或用 `2>/dev/null` 丢弃 stderr。详见 `references/agently-cli-pitfalls.md`。
+
+### agently-cli `--body-file` 必须用相对路径
+
+`agently-cli message +send` 的 `--body-file` 和 `--attachment` 不接受绝对路径。必须先 `cd` 到文件所在目录，再用相对路径传参。详见 `references/agently-cli-pitfalls.md`。
 
 ### 新旧 cron 冲突
 

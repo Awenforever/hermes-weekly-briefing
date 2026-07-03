@@ -106,7 +106,7 @@ Typst 已 bake 进标准镜像，路径 `/usr/local/bin/typst`。
 - 使用 agently-cli（`/opt/data/home/.local/bin/agently-cli`）
 - 主题前缀：⚚
 - 附件：report.pdf（相对路径，需 cd 到 PDF 所在目录）
-- 落款格式：限定词一行，换行后 `庄奕 ᥫᩣ` 或 `Hermes ᥫᩣ`。不要 `---` 分隔线，不要 `/` 符号
+- 落款格式：`---` 分隔线 → 换行 → 限定词 → 换行 → `庄奕 ᥫᩣ` 或 `Hermes ᥫᩣ`。不要 `/` 符号
 - 称呼：vive = adjective + "Kelvin J."
 - 寒暄/收束语：即兴，有人情味
 
