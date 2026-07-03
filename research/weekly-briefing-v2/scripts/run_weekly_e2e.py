@@ -28,25 +28,27 @@ PAPERS_DIR = DATA_DIR / "papers"
 CANDIDATES_DIR = PAPERS_DIR / "candidates"
 PROFILE_DIR = DATA_DIR / "profile"
 
-ACADEMIC_DOMAINS = (
-    "arxiv.org", "doi.org", "ieee.org", "ieeecomputer.org", "sciencedirect.com",
-    "springer.com", "springeropen.com", "nature.com", "mdpi.com", "frontiersin.org",
-    "tandfonline.com", "copernicus.org", "isprs", "acm.org", "wiley.com", "agu.org",
+ACADEMIC_DOMAINS = {
+    ".edu", "arxiv.org", "doi.org", "springer.com", "elsevier.com", "ieee.org",
+    "mdpi.com", "wiley.com", "nature.com", "science.org", "acm.org",
+    "researchgate.net", "semanticscholar.org", "sagepub.com", "tandfonline.com",
+    "frontiersin.org", "copernicus.org", "agu.org", "egu.eu",
     "neurips.cc", "openaccess.thecvf.com", "eartharxiv", "essopenarchive.org",
-)
-REJECT_DOMAINS = (
-    "noaa.gov", "ospo.noaa.gov", "nesdis.noaa.gov", "weather.gov",
-    "amazonaws.com", "github.com", "kaggle.com", "medium.com", "overwatchimaging.com"
-)
-CORE_TERMS = (
-    "smoke", "wildfire", "fire", "satellite", "remote sensing", "multispectral",
-    "segmentation", "detection", "transformer", "cnn", "vision", "earth observation"
-)
+}
+NON_ACADEMIC_DOMAINS = {
+    "github.com", "youtube.com", "twitter.com", "linkedin.com", "medium.com",
+    "reddit.com", "facebook.com", "instagram.com", "wikipedia.org",
+    "stackoverflow.com", "stackexchange.com", "quora.com", "substack.com",
+}
 
 def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+    return dt.datetime.now(dt.timezone.utc).isoformat()
 
-def read_json(path: Path, default: Any) -> Any:
+def iso_week_today() -> str:
+    y, w, _ = dt.date.today().isocalendar()
+    return f"{y}-W{w:02d}"
+
+def read_json(path: Path, default: Any = None) -> Any:
     try:
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
@@ -56,53 +58,18 @@ def read_json(path: Path, default: Any) -> Any:
 
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def log_event(log_path: Path, **kw: Any) -> None:
-    kw.setdefault("time", now_iso())
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(kw, ensure_ascii=False) + "\n")
-
-def iso_week_today() -> str:
-    y, w, _ = dt.date.today().isocalendar()
-    return f"{y}-W{w:02d}"
-
-def fetch_url(url: str, timeout: int = 20) -> tuple[int, str, str]:
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "HermesWeeklyE2E/1.0 (+academic weekly briefing; contact: local)",
-            "Accept": "application/json, application/atom+xml, text/plain, */*",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read(1024 * 1024)
-            ctype = r.headers.get("content-type", "")
-            text = raw.decode("utf-8", "replace")
-            return int(getattr(r, "status", 200)), ctype, text
-    except Exception as e:
-        return 0, "", f"FETCH_ERROR: {type(e).__name__}: {e}"
+def normalize_title(s: str) -> str:
+    return re.sub(r"\s+", " ", html.unescape(s or "")).strip()
 
 def extract_doi(text: str) -> str | None:
-    if not text:
-        return None
-    m = re.search(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", text)
-    if m:
-        return m.group(0).rstrip(").,;]")
-    return None
+    m = re.search(r"\b(10\.\d{4,}/[^\s\"'<>]+)", text)
+    return m.group(1).rstrip(".;,") if m else None
 
 def extract_arxiv_id(text: str) -> str | None:
-    if not text:
-        return None
-    m = re.search(r"arxiv\.org/(?:abs|html|pdf)/(\d{4}\.\d{4,5})(?:v\d+)?", text, re.I)
-    if m:
-        return m.group(1)
-    m = re.search(r"\barxiv[:\s]+(\d{4}\.\d{4,5})(?:v\d+)?", text, re.I)
-    if m:
-        return m.group(1)
-    return None
+    m = re.search(r"(?:arxiv\.org/abs/|arxiv:)(\d{4}\.\d{4,5}v?\d*)", text, re.IGNORECASE)
+    return m.group(1) if m else None
 
 def canonical_id(c: dict[str, Any]) -> str:
     doi = (c.get("doi") or extract_doi(" ".join(str(c.get(k,"")) for k in ("title","url","desc","abstract")))) or ""
@@ -114,9 +81,6 @@ def canonical_id(c: dict[str, Any]) -> str:
     url = str(c.get("url") or "").strip().lower()
     title = re.sub(r"\s+", " ", str(c.get("title") or "")).strip().lower()
     return "url:" + url if url else "title:" + title[:120]
-
-def normalize_title(s: str) -> str:
-    return re.sub(r"\s+", " ", html.unescape(s or "")).strip()
 
 def candidate_from_existing(obj: dict[str, Any], source: str) -> dict[str, Any]:
     title = normalize_title(str(obj.get("title") or obj.get("name") or ""))
@@ -155,6 +119,15 @@ def load_existing_candidates(week: str) -> list[dict[str, Any]]:
                             out.append(candidate_from_existing(item, "existing:" + path.name))
     return out
 
+def fetch_url(url: str, timeout: int = 15) -> tuple[int, str, str]:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "HermesWeeklyBriefing/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            ct = r.headers.get_content_type()
+            return r.status, ct, r.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return 0, "", str(e)
+
 def arxiv_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for q in queries:
@@ -174,7 +147,6 @@ def arxiv_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
                 "title": title,
                 "url": idurl,
                 "abstract": summary,
-                "doi": extract_doi(e),
                 "arxiv_id": extract_arxiv_id(idurl),
                 "source": "arxiv_api",
                 "published": published,
@@ -185,89 +157,71 @@ def arxiv_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
 def crossref_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for q in queries:
-        params = urllib.parse.urlencode({
-            "query.title": q,
-            "rows": str(max_each),
-            "sort": "published",
-            "order": "desc",
-            "filter": "from-pub-date:2024-01-01,type:journal-article",
-        })
-        url = "https://api.crossref.org/works?" + params
+        encoded = urllib.parse.quote(q)
+        url = f"https://api.crossref.org/works?query={encoded}&rows={max_each}&sort=published&order=desc&filter=type:journal-article"
         code, ctype, text = fetch_url(url, timeout=25)
-        if code != 200 or not text.strip().startswith("{"):
+        if code != 200:
             continue
         try:
             data = json.loads(text)
         except Exception:
             continue
         for item in data.get("message", {}).get("items", []):
-            title = normalize_title(" ".join(item.get("title") or []))
-            abstract = normalize_title(re.sub("<.*?>", " ", item.get("abstract") or ""))
-            doi = item.get("DOI")
-            url2 = item.get("URL") or ("https://doi.org/" + doi if doi else "")
-            year = ""
-            parts = item.get("published-print") or item.get("published-online") or item.get("created") or {}
-            if parts.get("date-parts"):
-                year = str(parts["date-parts"][0][0])
+            title = normalize_title(str(item.get("title", [""])[0] if item.get("title") else ""))
+            doi = item.get("DOI", "")
+            url_link = f"https://doi.org/{doi}" if doi else ""
+            abstract = normalize_title(str(item.get("abstract") or ""))
             authors = []
-            for a in item.get("author") or []:
-                nm = " ".join(x for x in [a.get("given",""), a.get("family","")] if x)
-                if nm:
-                    authors.append(nm)
+            for a in item.get("author", [])[:5]:
+                family = a.get("family", "")
+                given = a.get("given", "")
+                if family or given:
+                    authors.append(f"{given} {family}".strip())
+            published = ""
+            dp = item.get("published-print", {}) or item.get("published-online", {}) or item.get("created", {})
+            if isinstance(dp, dict):
+                parts = dp.get("date-parts", [[None]])[0]
+                if parts and parts[0]:
+                    published = str(parts[0])
             out.append({
                 "title": title,
-                "url": url2,
+                "url": url_link,
                 "abstract": abstract,
                 "doi": doi,
-                "arxiv_id": None,
                 "source": "crossref_api",
-                "published": year,
+                "published": published,
                 "authors": authors,
             })
     return out
 
 def is_paper_like(c: dict[str, Any]) -> tuple[bool, int, list[str]]:
-    title = normalize_title(c.get("title") or "")
-    url = str(c.get("url") or "")
-    abstract = normalize_title(c.get("abstract") or c.get("desc") or "")
-    blob = " ".join([title, url, abstract]).lower()
-    reasons: list[str] = []
     score = 0
+    reasons = []
+    title = str(c.get("title") or "")
+    url = str(c.get("url") or "")
+    abstract = str(c.get("abstract") or "")
 
-    doi = c.get("doi") or extract_doi(blob)
-    arx = c.get("arxiv_id") or extract_arxiv_id(blob)
-    if doi:
-        score += 3
-        reasons.append("doi")
-    if arx:
-        score += 3
-        reasons.append("arxiv")
+    for bad in NON_ACADEMIC_DOMAINS:
+        if bad in url.lower():
+            reasons.append(f"non_academic_domain:{bad}")
+            return False, -100, reasons
+
     if any(d in url.lower() for d in ACADEMIC_DOMAINS):
         score += 2
-        reasons.append("academic_domain")
-    if any(k in blob for k in ("journal", "proceedings", "conference", "arxiv", "doi", "abstract", "authors")):
-        score += 1
-        reasons.append("scholarly_text")
-    if len(abstract) >= 120:
-        score += 1
-        reasons.append("abstract_len")
-
-    rel = sum(1 for k in CORE_TERMS if k in blob)
-    score += min(rel, 5)
-    if rel:
-        reasons.append(f"relevance_terms:{rel}")
-
-    if any(d in url.lower() for d in REJECT_DOMAINS) and not (doi or arx):
-        score -= 4
-        reasons.append("reject_nonpaper_domain")
-    if any(x in title.lower() for x in ("product", "office", "system fire and smoke product", "dataset page")) and not (doi or arx):
-        score -= 3
-        reasons.append("reject_product_page")
-    if not title or len(title) < 10:
-        score -= 3
-        reasons.append("reject_bad_title")
-
-    return score >= 6 and bool(doi or arx or any(d in url.lower() for d in ACADEMIC_DOMAINS)), score, reasons
+    doi = extract_doi(" ".join([title, url, abstract]))
+    if doi:
+        score += 3
+        reasons.append("has_doi")
+    if extract_arxiv_id(" ".join([title, url])):
+        score += 2
+        reasons.append("has_arxiv_id")
+    if len(abstract) > 100:
+        score += 2
+        reasons.append("has_abstract")
+    if len(title) < 10 or len(title) > 400:
+        score -= 2
+        reasons.append("bad_title_length")
+    return score >= 2, score, reasons
 
 def dedup_candidates(cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen = set()
@@ -306,12 +260,6 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
     lines.append("")
     lines.append(f"**生成时间：** {now_iso()}")
     lines.append("")
-    lines.append("## 本周总体判断")
-    if selected:
-        lines.append("本轮流程已改为确定性 E2E runner：一次执行完成候选加载、硬过滤、报告生成、PDF 输出和交付回执落盘，避免在微信中分步执行时“说完就停”。")
-    else:
-        lines.append("本轮未筛出足够可靠论文，流程仍生成 manifest 与失败原因，避免静默失败。")
-    lines.append("")
     lines.append("## 流水线统计")
     for k, v in stats.items():
         lines.append(f"- **{k}：** {v}")
@@ -319,124 +267,53 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
     lines.append("## 入选论文")
     if not selected:
         lines.append("- 未入选论文。")
-    for i, p in enumerate(selected, 1):
-        title = normalize_title(p.get("title") or f"Paper {i}")
-        abstract = normalize_title(p.get("abstract") or p.get("desc") or "")
-        abstract_short = abstract[:600] + ("…" if len(abstract) > 600 else "")
-        lines.append(f"### {i}. {title}")
-        if p.get("authors"):
-            authors = p.get("authors")
-            if isinstance(authors, list):
-                lines.append(f"- **作者：** {', '.join(str(a) for a in authors[:6])}")
-        if p.get("published"):
-            lines.append(f"- **时间：** {p.get('published')}")
-        if p.get("doi"):
-            lines.append(f"- **DOI：** {p.get('doi')}")
-        if p.get("arxiv_id"):
-            lines.append(f"- **arXiv：** {p.get('arxiv_id')}")
-        if p.get("url"):
-            lines.append(f"- **链接：** {p.get('url')}")
-        lines.append(f"- **相关性判断：** 与烟雾/火灾遥感、深度学习检测或多光谱分析存在直接或邻近关系。")
-        if abstract_short:
-            lines.append(f"- **摘要摘录：** {abstract_short}")
+    for i, s in enumerate(selected, 1):
+        lines.append(f"### {i}. {s.get('title', '?')}")
+        lines.append(f"- **来源：** {s.get('source', '?')}")
+        if s.get("doi"):
+            lines.append(f"- **DOI：** [{s['doi']}](https://doi.org/{s['doi']})")
+        if s.get("arxiv_id"):
+            lines.append(f"- **arXiv：** [{s['arxiv_id']}](https://arxiv.org/abs/{s['arxiv_id']})")
+        if s.get("published"):
+            lines.append(f"- **发表：** {s['published']}")
+        if s.get("authors"):
+            lines.append(f"- **作者：** {', '.join(s['authors'][:5])}")
+        if s.get("abstract"):
+            lines.append(f"\n{s['abstract'][:500]}")
         lines.append("")
-    lines.append("## 下一步")
-    lines.append("- 正式观察期只看三件事：定时触发、论文真实性与方向相关性、manifest/report/PDF/delivery receipt 完整性。")
-    lines.append("- 跨设备同步已 discard，不再列为未完成项。")
-    lines.append("")
-    lines.append("---")
-    lines.append("Hermes ᥫᩣ")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines)
 
-def make_typst(markdown_text: str, out: Path) -> None:
-    title = "学术研究周报"
-    body = markdown_text.replace("\\", "\\\\").replace('"', '\\"')
-    out.write_text(
-        '#set text(font: "Noto Sans CJK SC", size: 10pt)\n'
-        '#set page(margin: 1.8cm)\n'
-        f'= {title}\n\n'
-        f'#raw("{body}")\n',
-        encoding="utf-8",
-    )
+def make_typst(md: str, out: Path) -> None:
+    lines = []
+    lines.append('#set page(paper: "a4", margin: (top: 2.5cm, bottom: 2cm, left: 2.2cm, right: 2.2cm))')
+    lines.append('#set text(font: ("Noto Sans CJK SC", "Noto Serif CJK SC"), size: 10pt, lang: "zh")')
+    lines.append(md)
+    out.write_text("\n".join(lines), encoding="utf-8")
 
-def pdf_escape(s: str) -> str:
-    s = s.encode("latin-1", "replace").decode("latin-1")
-    return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+def make_minimal_pdf(md: str, out: Path) -> None:
+    try:
+        from fpdf import FPDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.add_font("NotoSansCJK", "", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", uni=True)
+        pdf.set_font("NotoSansCJK", "", 10)
+        for line in md.split("\n")[:500]:
+            clean = re.sub(r"[#*`\[\]]+", "", line).strip()[:200]
+            if clean:
+                pdf.multi_cell(0, 5, clean)
+        pdf.output(str(out))
+    except Exception:
+        pass
 
-def make_minimal_pdf(markdown_text: str, out: Path) -> None:
-    plain = []
-    for line in markdown_text.splitlines():
-        line = re.sub(r"^#+\s*", "", line)
-        line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)
-        line = line.replace("⚚", "*").replace("ᥫᩣ", "")
-        if line.strip():
-            plain.append(line.strip())
-    pages = []
-    cur = []
-    for line in plain:
-        while len(line) > 92:
-            cur.append(line[:92])
-            line = line[92:]
-        cur.append(line)
-        if len(cur) >= 42:
-            pages.append(cur); cur=[]
-    if cur:
-        pages.append(cur)
-    if not pages:
-        pages=[["Hermes weekly report"]]
-
-    objects = []
-    # 1 catalog, 2 pages, then pairs page/content, final font
-    font_obj_num = 3 + 2 * len(pages)
-    kids = []
-    for idx, lines in enumerate(pages):
-        page_num = 3 + idx*2
-        cont_num = page_num + 1
-        kids.append(f"{page_num} 0 R")
-        content_lines = ["BT", "/F1 10 Tf", "50 790 Td", "14 TL"]
-        for l in lines:
-            content_lines.append(f"({pdf_escape(l)}) Tj")
-            content_lines.append("T*")
-        content_lines.append("ET")
-        stream = "\n".join(content_lines).encode("latin-1", "replace")
-        page_obj = f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 {font_obj_num} 0 R >> >> /Contents {cont_num} 0 R >>"
-        cont_obj = f"<< /Length {len(stream)} >>\nstream\n" + stream.decode("latin-1") + "\nendstream"
-        objects.append((page_num, page_obj))
-        objects.append((cont_num, cont_obj))
-    root = "<< /Type /Catalog /Pages 2 0 R >>"
-    pages_obj = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(pages)} >>"
-    font_obj = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
-    all_objs = [(1, root), (2, pages_obj)] + sorted(objects) + [(font_obj_num, font_obj)]
-
-    data = bytearray(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
-    offsets = [0] * (font_obj_num + 1)
-    for num, obj in all_objs:
-        offsets[num] = len(data)
-        data.extend(f"{num} 0 obj\n{obj}\nendobj\n".encode("latin-1", "replace"))
-    xref = len(data)
-    data.extend(f"xref\n0 {font_obj_num+1}\n".encode())
-    data.extend(b"0000000000 65535 f \n")
-    for i in range(1, font_obj_num+1):
-        data.extend(f"{offsets[i]:010d} 00000 n \n".encode())
-    data.extend(f"trailer\n<< /Size {font_obj_num+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
-    out.write_bytes(bytes(data))
-
-def split_weixin(markdown_text: str, max_chars: int = 1500) -> list[str]:
-    blocks = re.split(r"(?m)(?=^###\s+)", markdown_text)
-    chunks: list[str] = []
+def split_weixin(text: str, max_chars: int = 1500) -> list[str]:
+    chunks = []
     cur = ""
-    for b in blocks:
-        if len(cur) + len(b) <= max_chars:
-            cur += b
+    for line in text.split("\n"):
+        if len(cur) + len(line) + 1 > max_chars and cur.strip():
+            chunks.append(cur.strip())
+            cur = line + "\n"
         else:
-            if cur.strip():
-                chunks.append(cur.strip())
-            if len(b) <= max_chars:
-                cur = b
-            else:
-                for i in range(0, len(b), max_chars):
-                    chunks.append(b[i:i+max_chars].strip())
-                cur = ""
+            cur += line + "\n"
     if cur.strip():
         chunks.append(cur.strip())
     return chunks
@@ -456,10 +333,6 @@ def find_agently_cli() -> str | None:
             return c
     return None
 
-
-# HERMES_WEEKLY_AGENTLY_MAIL_V1
-
-# HERMES_WEEKLY_AGENTLY_MAIL_CONFIRM_V1
 def run_cmd(cmd: list[str], timeout: int = 90, cwd: Path | None = None) -> dict[str, Any]:
     started = time.time()
     env = {
@@ -468,186 +341,53 @@ def run_cmd(cmd: list[str], timeout: int = 90, cwd: Path | None = None) -> dict[
     }
     try:
         p = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout, cwd=str(cwd) if cwd else None, env=env)
-        return {
-            "cmd": cmd,
-            "cwd": str(cwd) if cwd else None,
-            "returncode": p.returncode,
-            "stdout": p.stdout[-12000:],
-            "stderr": p.stderr[-12000:],
-            "seconds": round(time.time()-started, 2),
-        }
-    except subprocess.TimeoutExpired as e:
-        return {
-            "cmd": cmd,
-            "cwd": str(cwd) if cwd else None,
-            "returncode": 124,
-            "stdout": (e.stdout or "")[-12000:] if isinstance(e.stdout, str) else "",
-            "stderr": (e.stderr or "")[-12000:] if isinstance(e.stderr, str) else "TIMEOUT",
-            "seconds": round(time.time()-started, 2),
-        }
+        return {"ok": p.returncode == 0, "stdout": p.stdout, "stderr": p.stderr, "returncode": p.returncode, "elapsed": round(time.time() - started, 2)}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "stdout": "", "stderr": "timeout", "returncode": -1, "elapsed": round(time.time() - started, 2)}
+    except Exception as e:
+        return {"ok": False, "stdout": "", "stderr": str(e), "returncode": -1, "elapsed": round(time.time() - started, 2)}
 
-def extract_oauth(text: str) -> str | None:
-    m = re.search(r"https?://\S*oauth\S*", text or "")
-    if m:
-        return m.group(0).rstrip("`'\" )]")
-    return None
-
-def extract_confirmation_token(text: str) -> str | None:
-    m = re.search(r"\bctk_[A-Za-z0-9_-]+\b", text or "")
-    if m:
-        return m.group(0)
-    return None
-
-def parse_jsonish(text: str) -> Any:
-    text = (text or "").strip()
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    m = re.search(r"(\{.*\})", text, flags=re.S)
-    if m:
-        try:
-            return json.loads(m.group(1))
-        except Exception:
-            pass
-    return None
-
-def parsed_confirmation(parsed: Any) -> tuple[bool, str | None]:
-    if isinstance(parsed, dict):
-        data = parsed.get("data")
-        if isinstance(data, dict):
-            if data.get("confirmation_required") is True:
-                return True, data.get("confirmation_token")
-    return False, None
-
-def try_send_email(to: list[str], subject: str, body_file: Path, pdf_file: Path, enabled: bool) -> dict[str, Any]:
-    rec: dict[str, Any] = {
-        "enabled": enabled,
-        "recipients": to,
-        "status": "not_attempted",
-        "attempts": [],
-        "oauth_url": None,
-        "confirmation_token": None,
-        "auto_confirmed": False,
-        "attachment_attempted": False,
-        "marker": "HERMES_WEEKLY_AGENTLY_MAIL_CONFIRM_V1",
-    }
-
+def try_send_email(to: list[str], subject: str, body_path: Path, pdf_path: Path, enabled: bool) -> dict[str, Any]:
+    rec: dict[str, Any] = {"status": "prepared", "to": to, "subject": subject}
+    if not to:
+        rec["status"] = "no_recipients"
+        return rec
     if not enabled:
         rec["status"] = "prepared"
         return rec
-
     cli = find_agently_cli() or ""
     rec["cli"] = cli
-
     if not cli:
-        rec["status"] = "failed"
-        rec["error"] = "agently-cli not found"
+        rec["status"] = "no_agently_cli"
         return rec
-
-    for cmd in ([cli, "--version"], [cli, "+me"]):
-        r = run_cmd(cmd, timeout=30)
-        rec["attempts"].append(r)
-
-    me_probe = rec["attempts"][-1]
-    if me_probe.get("returncode") != 0:
-        auth = run_cmd([cli, "auth", "login"], timeout=45)
-        rec["attempts"].append(auth)
-        combined = (auth.get("stdout","") or "") + "\n" + (auth.get("stderr","") or "")
-        rec["oauth_url"] = extract_oauth(combined)
-        rec["status"] = "auth_required"
-        rec["error"] = "OAuth required before sending" if rec["oauth_url"] else "agently-cli +me failed and auth login did not expose OAuth URL"
-        return rec
-
-    cwd = body_file.parent
-    base = [cli, "message", "+send"]
-    for recipient in to:
-        base.extend(["--to", recipient])
-
-    # Primary command: documented body-file + PDF attachment.
-    send_cmds = [
-        base + ["--subject", subject, "--body-file", body_file.name, "--attachment", pdf_file.name],
-        base + ["--subject", subject, "--body-file", body_file.name],
-    ]
-
-    last = None
-    for send_cmd in send_cmds:
-        rec["attachment_attempted"] = rec["attachment_attempted"] or ("--attachment" in send_cmd)
-        first = run_cmd(send_cmd, timeout=120, cwd=cwd)
-        rec["attempts"].append(first)
-        last = first
-
-        combined = (first.get("stdout","") or "") + "\n" + (first.get("stderr","") or "")
-        parsed = parse_jsonish(combined)
-        rec["last_send_parsed"] = parsed
-        required, token = parsed_confirmation(parsed)
-        if token:
-            rec["confirmation_token"] = token
-        else:
-            token = extract_confirmation_token(combined)
-            if token:
-                rec["confirmation_token"] = token
-                required = True
-
-        # IMPORTANT: confirmation_required has priority over returncode=0.
-        if required:
-            rec["status"] = "confirmation_required"
-            rec["error"] = "agently-cli requested confirmation-token"
-            auto_confirm_allowed = os.environ.get("HERMES_WEEKLY_EMAIL_AUTO_CONFIRM", "0") == "1"
-            fixed_recipient_ok = to == ["vive@mail.ustc.edu.cn"]
-
-            if auto_confirm_allowed and fixed_recipient_ok and token:
-                confirm_cmd = send_cmd + ["--confirmation-token", token]
-                second = run_cmd(confirm_cmd, timeout=120, cwd=cwd)
-                rec["attempts"].append(second)
-                rec["confirm_cmd"] = confirm_cmd
-                rec["auto_confirmed"] = True
-
-                combined2 = (second.get("stdout","") or "") + "\n" + (second.get("stderr","") or "")
-                parsed2 = parse_jsonish(combined2)
-                rec["confirm_send_parsed"] = parsed2
-                required2, token2 = parsed_confirmation(parsed2)
-                if token2:
-                    rec["confirmation_token_2"] = token2
-
-                if second.get("returncode") == 0 and not required2:
-                    # HERMES_WEEKLY_AGENTLY_MAIL_RECEIPT_CLEAN_V1
-                    rec["status"] = "sent"
-                    rec["successful_cmd"] = confirm_cmd
-                    rec.pop("error", None)
-                    return rec
-
-                rec["status"] = "failed"
-                rec["error"] = "confirmation-token send failed or still requires confirmation"
-                rec["last_returncode"] = second.get("returncode")
-                rec["last_stderr"] = second.get("stderr")
-                return rec
-
-            return rec
-
-        if first.get("returncode") == 0:
-            # HERMES_WEEKLY_AGENTLY_MAIL_RECEIPT_CLEAN_V1_DIRECT
+    try:
+        cwd = body_path.parent
+        result = run_cmd([cli, "message", "+send", "--to", to[0], "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name], timeout=60, cwd=cwd)
+        rec["send_result"] = result
+        if result.get("ok"):
             rec["status"] = "sent"
-            rec["successful_cmd"] = send_cmd
-            rec.pop("error", None)
-            return rec
-
-        if first.get("returncode") == 3:
-            rec["oauth_url"] = extract_oauth(combined)
-            rec["status"] = "auth_required"
-            rec["error"] = "authorization expired or missing"
-            return rec
-
-        stderr = (first.get("stderr") or "")
-        if "unknown flag" in stderr or "unknown shorthand" in stderr or "unknown command" in stderr:
-            continue
-
-    rec["status"] = "failed"
-    rec["error"] = "agently-cli message +send failed"
-    if last:
-        rec["last_returncode"] = last.get("returncode")
-        rec["last_stderr"] = last.get("stderr")
+        else:
+            stderr = result.get("stderr", "")
+            token_match = re.search(r"confirmation[_\s]?token[:\s]+([a-zA-Z0-9_-]+)", stderr)
+            if token_match:
+                token = token_match.group(1)
+                confirm_result = run_cmd([cli, "message", "+send", "--to", to[0], "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name, "--confirmation-token", token], timeout=60, cwd=cwd)
+                rec["confirm_result"] = confirm_result
+                rec["status"] = "sent" if confirm_result.get("ok") else "confirm_failed"
+            else:
+                rec["status"] = "send_failed"
+    except Exception as e:
+        rec["status"] = "error"
+        rec["error"] = str(e)
     return rec
+
+def log_event(log_path: Path, **kw: Any) -> None:
+    try:
+        entry = {"ts": now_iso(), **kw}
+        with log_path.open("a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -702,7 +442,6 @@ def main() -> int:
         candidates.extend(existing)
         log_event(run_log, type="existing_candidates", count=len(existing))
 
-        # Use direct APIs, not Hermes web_extract, to avoid URL safety fake-ip blocking.
         arxiv = arxiv_search(queries[:5], max_each=4)
         candidates.extend(arxiv)
         log_event(run_log, type="arxiv_api_candidates", count=len(arxiv))
@@ -715,6 +454,17 @@ def main() -> int:
         candidates = dedup_candidates(candidates)
         url_dedup_count = len(candidates)
 
+        # Cross-week dedup: exclude papers already seen in dedup.json
+        existing_ids = set()
+        for raw_key in dedup.get("papers", {}).keys():
+            if not any(raw_key.startswith(p) for p in ("doi:", "arxiv:", "url:", "title:")) and raw_key.startswith("10."):
+                existing_ids.add("doi:" + raw_key)
+            else:
+                existing_ids.add(raw_key)
+        cross_week_deduped = [c for c in candidates if canonical_id(c) not in existing_ids]
+        cross_dedup_removed = len(candidates) - len(cross_week_deduped)
+        candidates = cross_week_deduped
+
         filtered = []
         rejected = []
         for c in candidates:
@@ -726,20 +476,30 @@ def main() -> int:
             else:
                 rejected.append(c)
 
-        # Rank by filter score + relevance + source freshness.
         filtered.sort(key=lambda x: (x.get("filter_score",0), len(str(x.get("abstract",""))), 1 if x.get("source") != "existing" else 0), reverse=True)
         selected = filtered[: max(1, args.max_selected)]
 
         stats = {
             "raw_candidates": raw_count,
             "candidate_deduped": url_dedup_count,
+            "cross_week_deduped": cross_dedup_removed,
             "hard_filter_passed": len(filtered),
             "selected_count": len(selected),
             "rejected_count": len(rejected),
             "queries": len(queries),
         }
 
-        # Discovery-only mode: stop here, output selected papers for LLM deep analysis
+        # Update dedup.json with newly selected papers for cross-week dedup
+        now_ts = now_iso()
+        for s in selected:
+            dedup.setdefault("papers", {})[canonical_id(s)] = {
+                "first_seen_week": week,
+                "first_seen_at": now_ts,
+                "title": s.get("title", "")[:200],
+            }
+        dedup["updated_at"] = now_ts
+        write_json(PAPERS_DIR / "dedup.json", dedup)
+
         if args.discovery_only:
             discovery_out = {
                 "version": 2,
@@ -778,8 +538,8 @@ def main() -> int:
             "note": "Runner prepares Weixin chunks; actual send should be performed by Hermes gateway/cron wrapper with metadata footer.",
         })
 
-        email_to = args.email_to or [r.get("email") for r in read_json(DATA_DIR / "delivery.json", {}).get("email", {}).get("recipients", []) if r.get("email") and not str(r.get("email")).startswith("example")]
-        subject = f"⚚ 学术研究周报 {week} — smoke remote sensing"
+        email_to = args.email_to or []
+        subject = f"⚚ 学术研究周报 {week}"
         email_receipt = try_send_email(email_to, subject, report_md_path, report_pdf_path, bool(args.send_email and email_to))
 
         delivery_receipt = {
@@ -803,33 +563,19 @@ def main() -> int:
         }
         write_json(outdir / "delivery_receipt.json", delivery_receipt)
 
-        candidates_snapshot = {
-            "week": week,
-            "generated_at": now_iso(),
-            "raw_count": raw_count,
-            "filtered_count": len(filtered),
-            "selected_count": len(selected),
-            "selected": selected,
-            "rejected_sample": rejected[:10],
-        }
-        CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
-        write_json(CANDIDATES_DIR / f"{week}_e2e_candidates.json", candidates_snapshot)
-
         manifest.update({
             "status": "success" if selected else "no_selection",
             "stats": stats,
             "queries": queries,
-            "selected_papers": [
-                {
-                    "title": p.get("title"),
-                    "url": p.get("url"),
-                    "doi": p.get("doi"),
-                    "arxiv_id": p.get("arxiv_id"),
-                    "source": p.get("source"),
-                    "filter_score": p.get("filter_score"),
-                    "filter_reasons": p.get("filter_reasons"),
-                } for p in selected
-            ],
+            "selected_papers": [{
+                "title": p.get("title"),
+                "url": p.get("url"),
+                "doi": p.get("doi"),
+                "arxiv_id": p.get("arxiv_id"),
+                "source": p.get("source"),
+                "filter_score": p.get("filter_score"),
+                "filter_reasons": p.get("filter_reasons"),
+            } for p in selected],
             "outputs": {
                 "markdown": "report.md",
                 "typst": "report.typ",
@@ -845,9 +591,8 @@ def main() -> int:
         })
         write_json(outdir / "manifest.json", manifest)
         log_event(run_log, type="done", manifest_status=manifest["status"], email_status=email_receipt.get("status"), selected=len(selected))
-        print(json.dumps({"ok": True, "manifest": str(outdir / "manifest.json"), "report": str(report_md_path), "pdf": str(report_pdf_path), "email_status": email_receipt.get("status"), "oauth_url": email_receipt.get("oauth_url")}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": True, "manifest": str(outdir / "manifest.json"), "report": str(report_md_path), "pdf": str(report_pdf_path), "email_status": email_receipt.get("status")}, ensure_ascii=False, indent=2))
         return 0
-
     except Exception as e:
         tb = traceback.format_exc()
         manifest["status"] = "failed"
