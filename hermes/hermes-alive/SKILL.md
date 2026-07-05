@@ -92,10 +92,12 @@ hermes-alive/
 │   ├── dream_prompt.py      ← Claude Dreaming prompt
 │   ├── mood_engine.py       ← 5-dim emotion
 │   ├── cooldown_manager.py  ← Rate limiting
-│   └── ...
+│   ├── log_rotate.py        ← Daily log rotation + retention
+│   └── safe_io.py           ← Thread-safe file I/O helpers
 ├── scripts/
 │   ├── deploy.sh            ← One-command setup
-│   └── verify.sh            ← Health check
+│   ├── verify.sh            ← Health check
+│   └── logs.py              ← Log query tool (filter, stats, preview)
 ├── templates/
 │   ├── .env.template        ← Required env vars
 │   └── sources.yaml         ← Content source config
@@ -120,6 +122,33 @@ Key variables:
 | `HERMES_DREAM_INTERVAL_HOURS` | 24 | Hours between dreams |
 | `HERMES_PROACTIVE_COOLDOWN_MINUTES` | 120 | Min minutes between messages |
 | `PLAYWRIGHT_BROWSERS_PATH` | `/opt/data/.playwright-browsers` | Chromium location |
+
+## Logging
+
+All watcher decisions are logged to `proactive_log.jsonl` in the shared directory. Every tick produces one JSONL entry.
+
+**Log rotation** (`log_rotate.py`): Runs on watcher startup. Archives yesterday's log as `proactive_log.YYYY-MM-DD.jsonl`, deletes archives older than `HERMES_ALIVE_LOG_RETENTION_DAYS` (default 7).
+
+**Query tool** (`scripts/logs.py`): Human-readable filtering and stats.
+
+```bash
+# Recent entries with message previews
+python3 scripts/logs.py --tail 5 --preview
+
+# All sent messages since a date
+python3 scripts/logs.py --decision sent --since 2026-07-01 --preview
+
+# Stats overview
+python3 scripts/logs.py --stats
+
+# Raw JSON for piping
+python3 scripts/logs.py --decision error --json
+
+# See cooldown skips
+python3 scripts/logs.py --reason cooldown --tail 5
+```
+
+Available filters: `--decision` (sent/skip/dream/start/stop/error), `--since`, `--until`, `--reason`, `--tail N`, `--all`, `--preview`, `--stats`, `--json`.
 
 ## Design Principles
 

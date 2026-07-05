@@ -141,8 +141,11 @@ class ProactivePlatformWatcher:
                 return False
 
         discovery_context = await self._check_discovery()
+        if discovery_context is not None:
+            self._log_discovery(tick_id, discovery_context)
         await self._check_dream()
         msg_type, content, generated_by = await self._compose_message(mood, discovery_context)
+        self._log_compose(tick_id, mood, discovery_context, msg_type, generated_by)
 
         metadata = self._metadata(generated_by)
         try:
@@ -424,7 +427,58 @@ class ProactivePlatformWatcher:
         try:
             append_jsonl(PROACTIVE_LOG, record, "proactive_log.lock")
         except Exception:
-            logger.debug("Failed to append proactive log", exc_info=True)
+            logger.exception("Failed to write proactive log entry")
+
+    def _log_discovery(self, tick_id: str, ctx: dict[str, Any]) -> None:
+        """Log discovery results: source names and item counts."""
+        external = ctx.get("external", []) or []
+        local = ctx.get("local", []) or []
+
+        # Count by source
+        source_counts: dict[str, int] = {}
+        for item in external:
+            src = item.get("source", "unknown")
+            source_counts[src] = source_counts.get(src, 0) + 1
+
+        self._log(
+            "discovery",
+            tick_id=tick_id,
+            external_count=len(external),
+            local_count=len(local),
+            sources=list(source_counts.keys()),
+            source_counts=source_counts,
+        )
+
+    def _log_compose(
+        self,
+        tick_id: str,
+        mood: Any,
+        discovery_context: dict[str, Any] | None,
+        msg_type: str,
+        generated_by: str,
+    ) -> None:
+        """Log compose context: mood snapshot, model, discovery availability, msg type."""
+        mood_snapshot: dict[str, float] = {}
+        if mood is not None:
+            try:
+                from mood_engine import DIMENSIONS
+                mood_snapshot = {dim: round(float(getattr(mood, dim, 0.0)), 2) for dim in DIMENSIONS}
+            except Exception:
+                pass
+
+        had_discovery = discovery_context is not None
+        external_n = len(discovery_context.get("external", []) or []) if had_discovery else 0
+        local_n = len(discovery_context.get("local", []) or []) if had_discovery else 0
+
+        self._log(
+            "compose",
+            tick_id=tick_id,
+            model=generated_by,
+            msg_type=msg_type,
+            mood=mood_snapshot,
+            had_discovery=had_discovery,
+            discovery_items=external_n + local_n,
+        )
 
 def _truthy(value: str | None) -> bool:
     return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}

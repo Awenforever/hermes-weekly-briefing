@@ -123,6 +123,18 @@ def format_entry(entry: dict, show_preview: bool = False) -> str:
         parts.append(f"ops={entry.get('ops', 0)}")
         parts.append(f"summary={entry.get('summary', '')}")
 
+    elif decision == "discovery":
+        parts.append(f"external={entry.get('external_count', 0)}")
+        parts.append(f"local={entry.get('local_count', 0)}")
+        parts.append(f"sources={entry.get('sources', [])}")
+
+    elif decision == "compose":
+        parts.append(f"model={entry.get('model', '?')}")
+        parts.append(f"msg_type={entry.get('msg_type', '?')}")
+        mood = entry.get('mood', {})
+        if mood:
+            parts.append(f"mood={mood}")
+
     elif decision == "skip":
         parts.append(f"quiet={entry.get('quiet_hours', False)}")
 
@@ -161,7 +173,7 @@ def print_stats(entries: list[dict]):
 def main():
     parser = argparse.ArgumentParser(description="Query Hermes Alive proactive log")
     parser.add_argument("--tail", type=int, default=10, help="Show last N entries (default 10)")
-    parser.add_argument("--decision", choices=["sent", "skip", "dream", "start", "stop", "error"], help="Filter by decision")
+    parser.add_argument("--decision", choices=["sent", "skip", "dream", "discovery", "compose", "start", "stop", "error"], help="Filter by decision")
     parser.add_argument("--since", help="Entries on or after YYYY-MM-DD")
     parser.add_argument("--until", help="Entries on or before YYYY-MM-DD")
     parser.add_argument("--reason", help="Filter by reason (substring match)")

@@ -21,6 +21,7 @@ Delegate coding tasks to [Codex](https://github.com/openai/codex) via the Hermes
 - Refactoring
 - PR reviews
 - Batch issue fixing
+- **Comprehensive audits** — delegate a deep code review + isolation test, then a follow-up task to fix everything found
 
 Requires the codex CLI and a git repository.
 
@@ -111,6 +112,10 @@ Clone to a temp directory for safe review:
 ```
 terminal(command="REVIEW=$(mktemp -d) && git clone https://github.com/user/repo.git $REVIEW && cd $REVIEW && gh pr checkout 42 && codex review --base origin/main")
 ```
+
+## Comprehensive Audits
+
+For deep code quality audits, use the two-round delegation pattern documented in `references/audit-and-fix-pattern.md`. Round 1 audits (read-only, no fixes) → Round 2 fixes all critical issues + verifies in isolation.
 
 ## Parallel Issue Fixing with Worktrees
 
