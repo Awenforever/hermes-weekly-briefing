@@ -87,6 +87,8 @@ class ProactivePlatformWatcher:
                 logger.warning("Hermes Alive watcher already running; singleton lock unavailable")
                 self._log("skip", reason="watcher_lock_unavailable")
                 return
+            from log_rotate import rotate_proactive_log
+            rotate_proactive_log(BASE)
             self._log("start", reason="watcher_started")
             logger.info("Proactive platform watcher started id=%s", self.watcher_id)
             try:
