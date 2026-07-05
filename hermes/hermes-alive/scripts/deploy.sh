@@ -10,7 +10,7 @@ set -e
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK_DIR="${HOOK_DIR:-/opt/data/hooks/hermes-alive}"
 SHARED_DIR="${SHARED_DIR:-/opt/data/hermes_alive_shared}"
-HERMES_VENV="${HERMES_VENV:-/opt/hermes/.venv}"
+HERMES_VENV="${HERMES_VENV:-}"
 BROWSER_DIR="${BROWSER_DIR:-/opt/data/.playwright-browsers}"
 
 RED='\033[0;31m'
@@ -27,6 +27,8 @@ deploy_hooks() {
     mkdir -p "$HOOK_DIR" "$SHARED_DIR"
     cp "$SKILL_DIR/hooks/"*.py "$HOOK_DIR/"
     cp "$SKILL_DIR/hooks/HOOK.yaml" "$HOOK_DIR/"
+    cp "$SKILL_DIR/hooks/safe_io.py" "$SHARED_DIR/safe_io.py"
+    cp "$SKILL_DIR/hooks/mood_engine.py" "$SHARED_DIR/mood_engine.py"
     cp "$SKILL_DIR/templates/sources.yaml" "$SHARED_DIR/sources.yaml"
     log "Hook files deployed"
 }
@@ -64,6 +66,27 @@ verify_files() {
 
 install_deps() {
     log "Installing Python dependencies..."
+    # Detect venv path: use HERMES_VENV if set, else try common paths
+    if [ -z "${HERMES_VENV:-}" ]; then
+        if [ -f "/opt/hermes/.venv/bin/python3" ]; then
+            HERMES_VENV="/opt/hermes/.venv"
+        elif [ -f "$(dirname "$SKILL_DIR")/.venv/bin/python3" ]; then
+            HERMES_VENV="$(cd "$(dirname "$SKILL_DIR")/.venv" && pwd)"
+        else
+            warn "No Python venv found. Set HERMES_VENV to your venv path and try again."
+            return 1
+        fi
+    fi
+    # Validate venv
+    if [ ! -f "$HERMES_VENV/bin/python3" ]; then
+        warn "Python3 not found at $HERMES_VENV/bin/python3 — check HERMES_VENV"
+        return 1
+    fi
+    # Check uv availability
+    if ! command -v uv &>/dev/null; then
+        warn "uv not found. Install it: pip install uv or see https://docs.astral.sh/uv/"
+        return 1
+    fi
     "$HERMES_VENV/bin/python3" -c "import playwright" 2>/dev/null || {
         uv pip install playwright --python "$HERMES_VENV/bin/python3"
     }

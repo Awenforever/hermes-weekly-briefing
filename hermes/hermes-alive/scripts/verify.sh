@@ -26,10 +26,14 @@ echo ""
 
 # 2. Check gateway loaded the hook
 echo "Gateway integration:"
-if docker logs hermes-hermes-1 2>&1 | grep -q "Loaded hook.*hermes-alive"; then
-    pass "Hook loaded by gateway"
+if command -v docker &>/dev/null; then
+    if docker logs hermes-hermes-1 2>&1 | grep -q "Loaded hook.*hermes-alive"; then
+        pass "Hook loaded by gateway"
+    else
+        fail "Hook NOT loaded — gateway restart needed?"
+    fi
 else
-    fail "Hook NOT loaded — gateway restart needed?"
+    echo "  docker not available — skipping gateway check"
 fi
 echo ""
 
@@ -76,10 +80,14 @@ echo ""
 
 # 6. Check watcher running
 echo "Runtime:"
-if docker logs hermes-hermes-1 2>&1 | grep -q "watcher started"; then
-    pass "Watcher started"
+if command -v docker &>/dev/null; then
+    if docker logs hermes-hermes-1 2>&1 | grep -q "watcher started"; then
+        pass "Watcher started"
+    else
+        fail "Watcher may not have started yet"
+    fi
 else
-    fail "Watcher may not have started yet"
+    echo "  docker not available — skipping runtime check"
 fi
 
 echo ""

@@ -58,11 +58,39 @@ ssh -i /opt/data/ssh/hermes_host_ed25519 -o StrictHostKeyChecking=no vive@192.16
   'docker exec <name> <command>'
 ```
 
+## Docker Compose Operations
+
+Hermes containers (`hermes-hermes-1`, `hermes-dashboard-1`) are managed by docker compose. The compose file lives at:
+
+```
+/volume2/@appstore/com.ugreen.docker.hermes/docker-compose.yaml
+```
+
+### Find compose directory
+```bash
+ssh -i /opt/data/ssh/hermes_host_ed25519 -o StrictHostKeyChecking=no vive@192.168.125.12 \
+  "docker inspect hermes-hermes-1 --format '{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}'"
+```
+
+### Restart Hermes (picks up config changes)
+```bash
+ssh -i /opt/data/ssh/hermes_host_ed25519 -o StrictHostKeyChecking=no vive@192.168.125.12 \
+  'cd /volume2/@appstore/com.ugreen.docker.hermes && docker compose restart hermes'
+```
+
+### Verify config inside Hermes container after restart
+```bash
+ssh -i /opt/data/ssh/hermes_host_ed25519 -o StrictHostKeyChecking=no vive@192.168.125.12 \
+  'docker exec hermes-hermes-1 grep -A5 "pattern" /opt/data/config.yaml'
+```
+
 ## Pitfalls
 - Host DNS hijacks blocked domains to 127.0.0.1 (dnsmasq). Use explicit `--proxy` flag for curl or ensure proxy env is loaded.
 - Docker daemon has its own proxy config (systemd override), so `docker pull` works regardless of shell env.
 - Long-running operations should use terminal background mode.
 - Non-login SSH sessions don't load `/etc/profile.d/` — always source proxy env explicitly if needed.
+- **`docker restart` ≠ `docker compose restart`**: `docker restart hermes-hermes-1` restarts the container process but `docker compose restart hermes` is the canonical way for compose-managed containers. Both work, but compose is preferred for consistency.
+- **Config changes to auxiliary models** (vision, approval, etc.) require a Hermes restart to take effect — `hermes config set` writes the file but the running process caches config at startup.
 
 ## Network Topology (for context)
 - Host eth1: 192.168.125.12/24 (physical LAN)

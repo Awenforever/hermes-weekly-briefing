@@ -8,8 +8,8 @@ import logging
 import os
 import sys
 # Hermes Alive import path bootstrap
-_HOOK_DIR = "/opt/data/hooks/hermes-alive"
-_SHARED_DIR = "/opt/data/hermes_alive_shared"
+_HOOK_DIR = os.getenv("HERMES_HOOK_DIR", "/opt/data/hooks/hermes-alive")
+_SHARED_DIR = os.getenv("HERMES_SHARED_DIR", "/opt/data/hermes_alive_shared")
 for _p in (_HOOK_DIR, _SHARED_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)

@@ -142,8 +142,9 @@ Before publishing a skill for installation, verify it's self-contained. See `ref
 
 Key lessons from in-the-wild deployment (2026-07-03):
 - Personal info leaks (email, name, signature, research keywords) are the #1 privacy hazard. Every SKILL.md and template must be scanned before publish.
-- Always test in a fresh isolated env with empty data directories — "first-run" errors are expected (missing dedup.json), but "can't find script" or "can't parse config" errors mean the skill isn't portable.
-- **Upgrade path must be designed in, not bolted on later.** The simplest reliable pattern: `hermes skills install <URL>` as re-install. It works because data (in `$DATA_DIR`) and skills (in `~/.hermes/skills/`) are separate. Document upgrade coverage in README: what gets overwritten (scripts, templates, SKILL.md) vs what doesn't (config.json, papers, reports, profile).
+- Always test in a fresh isolated env with empty data directories -- first-run errors are expected (missing dedup.json), but script-not-found or config-parse errors mean the skill is not portable.
+- Upgrade path must be designed in, not bolted on later. The simplest reliable pattern: hermes skills install URL as re-install. Data (in DATA_DIR) and skills (in ~/.hermes/skills/) are separate by design.
+- Data pipeline read-write loops must be closed. Loading a state file without using it for filtering creates silent drift. Every read_json call must either feed into a filtering decision or have an explicit comment explaining it is reference-only. Unused state-file loads are bugs that surface weeks later as duplicate data accumulates.
 
 ## Common Pitfalls
 

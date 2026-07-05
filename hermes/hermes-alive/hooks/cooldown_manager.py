@@ -33,7 +33,7 @@ class CooldownManager:
         self._reset_if_new_day()
 
     def can_send(self, msg_type: str) -> tuple[bool, str]:
-        del msg_type
+        _ = msg_type  # unused but kept for signature compatibility
         self._reset_if_new_day()
         if self.is_quiet_hours():
             return False, "quiet_hours"

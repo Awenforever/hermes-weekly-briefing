@@ -168,7 +168,7 @@ class ExternalDiscovery:
             "+OR+(all:wildfire AND all:deep+learning)"
             "&sortBy=submittedDate&sortOrder=descending&max_results=3"
         )
-        url = f"http://export.arxiv.org/api/query?{query}"
+        url = f"https://export.arxiv.org/api/query?{query}"
         headers = {"User-Agent": "HermesAlive/1.0 (discovery)"}
 
         async with session.get(url, headers=headers) as resp:
@@ -399,7 +399,7 @@ class ExternalDiscovery:
                 continue
             full_name = match.group(1)
             desc_match = re.search(
-                r'<p[^>]*class="[^"]*col-9[^"]*"[^>]*>\\s*(.*?)\\s*</p>',
+                r'<p[^>]*class="[^"]*col-9[^"]*"[^>]*>\s*(.*?)\s*</p>',
                 block,
                 re.DOTALL,
             )
@@ -408,7 +408,7 @@ class ExternalDiscovery:
                 description = desc_match.group(1).strip()
 
             lang_match = re.search(
-                r'<span[^>]*itemprop="programmingLanguage"[^>]*>\\s*(.*?)\\s*</span>',
+                r'<span[^>]*itemprop="programmingLanguage"[^>]*>\s*(.*?)\s*</span>',
                 block,
             )
             language = lang_match.group(1).strip() if lang_match else ""
