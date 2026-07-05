@@ -129,7 +129,6 @@ class DreamEngine:
         # Read MEMORY.md
         memory_paths = [
             os.getenv("HERMES_HOME", "/opt/data") + "/memories/MEMORY.md",
-            os.getenv("HERMES_HOME", "/opt/data") + "/memories/MEMORY.md",
         ]
         for mp in memory_paths:
             try:
@@ -413,7 +412,6 @@ class DreamEngine:
     def _resolve_memory_path(self) -> str | None:
         """Find the actual MEMORY.md path."""
         candidates = [
-            os.getenv("HERMES_HOME", "/opt/data") + "/memories/MEMORY.md",
             os.getenv("HERMES_HOME", "/opt/data") + "/memories/MEMORY.md",
         ]
         for p in candidates:
