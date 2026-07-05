@@ -14,21 +14,29 @@ Your job: review recent sessions, identify what's changed, produce a clean diff.
 Understand what already exists:
 - Read current MEMORY.md and USER.md
 - List all facts in fact_store
-- Search recent 3–5 sessions for user context
+- **Read real session transcripts from state.db** — the `session_transcripts` field in the
+  orient data contains actual conversation previews (first 500 + last 300 chars each)
+  from the 3–5 most recent Weixin DM sessions. Use these for signal extraction.
 
 ## Phase 2 — Gather Signal
-Look for changes in recent sessions:
+Look for changes in **real session transcripts** provided in the input:
 
 ### Corrections (highest priority)
+The user explicitly corrected or contradicted something Hermes previously knew.
 Keywords: "actually", "no", "wrong", "not right", "stop doing", "don't do",
 "I said", "I meant", "that's not", "correction", "不要", "不是", "错了"
+**Extract the exact correction the user made.**
 
 ### New Preferences
+The user stated a preference for how Hermes should behave.
 Keywords: "I prefer", "always use", "never use", "I like", "I don't like",
 "from now on", "going forward", "remember that", "keep in mind", "我偏好"
+**Extract the preference statement and its scope.**
 
 ### Important Decisions
+The user made a decision about tools, workflow, or configuration.
 Keywords: "let's go with", "I decided", "we're using", "switch to", "决定", "选定"
+**Note what was decided and any action items.**
 
 ### Stale Facts
 Facts not confirmed/referenced in 30+ days

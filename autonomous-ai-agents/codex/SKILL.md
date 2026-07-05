@@ -117,6 +117,8 @@ terminal(command="REVIEW=$(mktemp -d) && git clone https://github.com/user/repo.
 
 For deep code quality audits, use the two-round delegation pattern documented in `references/audit-and-fix-pattern.md`. Round 1 audits (read-only, no fixes) → Round 2 fixes all critical issues + verifies in isolation.
 
+**Splitting fix rounds**: If a single "fix everything" task is too large (50+ tool calls, 3+ independent changes across many files), split into one delegation per issue rather than one massive task. Codex will hit `max_iterations` and exit without finishing if the task scope exceeds ~50 operations. A successful pattern: audit (one task) → issue-A fix (one task) → issue-B fix (one task) → verify (you).
+
 ## Parallel Issue Fixing with Worktrees
 
 ```

@@ -408,10 +408,18 @@ class ProactivePlatformWatcher:
             try:
                 logger.debug("Running dream consolidation cycle")
                 diff = await engine.run_dream_cycle()
+                mood_after = {}
+                try:
+                    from mood_engine import MoodEngine, DIMENSIONS
+                    me = MoodEngine()
+                    mood_after = {dim: round(float(getattr(me.state, dim, 0.0)), 2) for dim in DIMENSIONS}
+                except Exception:
+                    pass
                 self._log("dream", reason="dream_cycle_complete",
                           ops=len(diff.operations),
                           prunes=len(diff.prune_candidates),
-                          summary=diff.summary)
+                          summary=diff.summary,
+                          mood_after=mood_after)
             except Exception:
                 logger.exception("Dream consolidation failed")
 
