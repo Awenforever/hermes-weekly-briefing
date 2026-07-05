@@ -22,6 +22,9 @@ Delegate coding tasks to [Codex](https://github.com/openai/codex) via the Hermes
 - PR reviews
 - Batch issue fixing
 - **Comprehensive audits** — delegate a deep code review + isolation test, then a follow-up task to fix everything found
+- **Bulk code changes** — this is the primary workflow: delegate all non-trivial code modifications to Codex. The parent agent (庄奕) handles only small fixes, verification, and architectural decisions.
+
+**Codex-first principle**: Codex handles bulk implementation, the parent agent does architecture, small fixes, and final verification. When in doubt, delegate.
 
 Requires the codex CLI and a git repository.
 
@@ -203,6 +206,16 @@ docker exec container sh -c 'cd /repo && cat /tmp/codex-prompt.txt | codex exec 
 ```bash
 cd /path/to/repo && git add -A && git commit -m "feat: description"
 ```
+
+### Multi-line string corruption from patch operations
+
+Codex `patch` operations can silently corrupt multi-line strings (e.g. Python triple-quoted `"""..."""` blocks like SYSTEM_PROMPT). The symptom: lines gain extra `|` or `|||` prefix characters because the patch's `old_string` partially matched a git diff context prefix. This is especially likely when modifying sections inside long string literals.
+
+**Detection**: grep for `^||||` or `^|||` in .py files after any Codex patch that touched string content.
+
+**Fix**: use `sed -i '158,168d' file.py` to delete the corrupted lines, or rewrite the entire string block. Then verify with `python3 -c "import ast; ast.parse(open('file.py').read())"`.
+
+**Prevention**: when delegating changes to SYSTEM_PROMPT or other multi-line strings, ask Codex to rewrite the ENTIRE block rather than patching sub-sections.
 
 ### Chinese character accuracy
 
