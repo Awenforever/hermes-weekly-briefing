@@ -114,6 +114,10 @@ def format_entry(entry: dict, show_preview: bool = False) -> str:
         parts.append(f"type={entry.get('msg_type', '?')}")
         parts.append(f"model={entry.get('generated_by', '?')}")
         parts.append(f"result={entry.get('adapter_result', '?')}")
+        msg_index = entry.get("msg_index")
+        msg_count = entry.get("msg_count")
+        if msg_index is not None and msg_count is not None:
+            parts.append(f"[{msg_index}/{msg_count}]")
         if show_preview:
             preview = entry.get("message_preview", "")
             if preview:

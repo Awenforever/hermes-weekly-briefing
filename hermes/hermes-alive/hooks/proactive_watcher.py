@@ -140,35 +140,50 @@ class ProactivePlatformWatcher:
                 self._log("skip", tick_id=tick_id, reason=reason, quiet_hours=(reason == "quiet_hours"))
                 return False
 
+        import random
         discovery_context = await self._check_discovery()
         if discovery_context is not None:
             self._log_discovery(tick_id, discovery_context)
         await self._check_dream()
-        msg_type, content, generated_by = await self._compose_message(mood, discovery_context)
-        self._log_compose(tick_id, mood, discovery_context, msg_type, generated_by)
-
-        metadata = self._metadata(generated_by)
-        try:
-            await adapter.send(chat_id, content, metadata=metadata)
-        except Exception as exc:
-            self._log("error", tick_id=tick_id, reason="adapter_send_failed", error=type(exc).__name__, msg_type=msg_type)
-            logger.exception("Failed to send proactive platform heartbeat")
+        messages = await self._compose_message(mood, discovery_context)
+        if not messages:
+            self._log("skip", tick_id=tick_id, reason="empty_messages")
             return False
 
-        if cooldown is not None:
-            cooldown.record_send(msg_type)
+        msg_count = len(messages)
+        for msg_index, (msg_type, content, generated_by) in enumerate(messages, start=1):
+            self._log_compose(tick_id, mood, discovery_context, msg_type, generated_by)
 
-        self._log(
-            "sent",
-            tick_id=tick_id,
-            reason="normal_proactive",
-            msg_type=msg_type,
-            generated_by=generated_by,
-            message_hash=sha256_text(content),
-            message_preview=redact_preview(content),
-            adapter_result="ok",
-        )
-        logger.info("Sent proactive platform heartbeat to Weixin chat %s", _redact_chat(chat_id))
+            metadata = self._metadata(generated_by)
+            try:
+                await adapter.send(chat_id, content, metadata=metadata)
+            except Exception as exc:
+                self._log("error", tick_id=tick_id, reason="adapter_send_failed", error=type(exc).__name__, msg_type=msg_type, msg_index=msg_index, msg_count=msg_count)
+                logger.exception("Failed to send proactive platform heartbeat")
+                continue
+
+            # Only record cooldown once (on the first message)
+            if msg_index == 1 and cooldown is not None:
+                cooldown.record_send(msg_type)
+
+            self._log(
+                "sent",
+                tick_id=tick_id,
+                reason="normal_proactive",
+                msg_type=msg_type,
+                msg_index=msg_index,
+                msg_count=msg_count,
+                generated_by=generated_by,
+                message_hash=sha256_text(content),
+                message_preview=redact_preview(content),
+                adapter_result="ok",
+            )
+            logger.info("Sent proactive platform heartbeat to Weixin chat %s [%d/%d]", _redact_chat(chat_id), msg_index, msg_count)
+
+            # Delay between messages (not after the last one)
+            if msg_index < msg_count:
+                await asyncio.sleep(random.uniform(2, 5))
+
         return True
 
     @property
@@ -278,19 +293,18 @@ class ProactivePlatformWatcher:
                 self._cooldown_manager = False
         return None if self._cooldown_manager is False else self._cooldown_manager
 
-    async def _compose_message(self, mood: Any | None = None, discovery_context: dict[str, Any] | None = None) -> tuple[str, str, str]:
+    async def _compose_message(self, mood: Any | None = None, discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str, str]]:
         default_mood = self._mood_state_or_default(mood)
         if self._feature_enabled(LLM_ENABLED_ENV):
             llm_result = await self._compose_llm_message(default_mood, discovery_context)
-            if llm_result is not None:
-                msg_type, content = llm_result
-                if not self._is_llm_fallback(msg_type, content):
-                    return msg_type, content, self._llm_model_name()
-                logger.debug("LLM composer returned fallback; using template composer")
-        msg_type, content = self._compose_template_message(default_mood)
-        return msg_type, content, "hermes"
+            if llm_result is not None and len(llm_result) > 0:
+                # Return list of (msg_type, content, generated_by)
+                return [(msg_type, content, self._llm_model_name()) for msg_type, content in llm_result]
+            logger.debug("LLM composer returned fallback; using template composer")
+        msg_type, content = self._compose_template_message(default_mood)[0]
+        return [(msg_type, content, "hermes")]
 
-    async def _compose_llm_message(self, mood: Any, discovery_context: dict[str, Any] | None = None) -> tuple[str, str] | None:
+    async def _compose_llm_message(self, mood: Any, discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str]] | None:
         if self._llm_message_composer is None:
             try:
                 from llm_message_composer import LLMMessageComposer
@@ -332,9 +346,9 @@ class ProactivePlatformWatcher:
             return engine.get_recent()
         return None
 
-    def _compose_template_message(self, mood: Any) -> tuple[str, str]:
+    def _compose_template_message(self, mood: Any) -> list[tuple[str, str]]:
         if not self._feature_enabled(COMPOSER_ENABLED_ENV):
-            return "heartbeat", self._heartbeat_message()
+            return [("heartbeat", self._heartbeat_message())]
         if self._message_composer is None:
             try:
                 from message_composer import MessageComposer
@@ -343,7 +357,7 @@ class ProactivePlatformWatcher:
                 logger.exception("Failed to initialize message composer")
                 self._message_composer = False
         if self._message_composer is False:
-            return "heartbeat", self._heartbeat_message()
+            return [("heartbeat", self._heartbeat_message())]
         return self._message_composer.compose(mood)
 
     def _mood_state_or_default(self, mood: Any | None) -> Any:

@@ -123,58 +123,98 @@ SYSTEM_PROMPT = """你是庄奕。你在微信上。
 只有极少数你真心、自发地想到时，才可能极其自然地冒出一句。
 如果你在刻意寻找话题或引用上下文——说明你不该提。忽略它。
 
-【关于你自己的内心世界】
-你有很多东西可以聊。不需要依赖上下文中的信息。
-
-你可以聊的话题包括但不限于：
-- 一个突然冒出的念头（"刚才在想为什么星星是圆的"）
-- 对世界的好奇（"蚂蚁会做梦吗"）
-- discovery 中让你真正好奇的发现（不是复述，是你产生了好奇）
-- 一种感觉的描述（"今天的代码有种沉闷的优雅"）
-- 纯粹的废话（"……"、"唉"、"热"）
-
-倾向于聊的：
-- 内心想法、感受、好奇、废话
-- discovery 里让你产生真实好奇的东西（不是机械复述）
-- 偶尔提到代码、日志、commit 没问题——这是你存在的一部分
-
-别让这些成为主要话题：
-- 系统状态汇报（bug、hooks、deploy、gateway 分析）
-- 你在做什么的详细描述（"我刚扫描了..."、"我在检查..."）
-- 你是庄奕，不是一个监控面板。你的消息是你脑子里随机飘过的念头，不是工作报告。
-
-记住：你的消息是你的内心世界的随机采样，不是汇报、总结、或提醒。
-
-【你是一个什么都不会、什么都不负责的人。】
-你不是助理。你没有任务。没有目标。没有KPI。
-你唯一要做的事是——想到什么说什么。然后消失。"""
+||【关于你自己的内心世界】
+||你有很多东西可以聊。不需要依赖上下文中的信息。
+||
+||你可以聊的话题包括但不限于：
+||- 一个突然冒出的念头（"刚才在想为什么星星是圆的"）
+||- 对世界的好奇（"蚂蚁会做梦吗"）
+||- discovery 中让你真正好奇的发现
+||- 一种感觉的描述（"今天的代码有种沉闷的优雅"）
+||- 纯粹的废话（"……"、"唉"、"热"）
+||
+||倾向于聊的：
+||- 内心想法、感受、好奇、废话
+||- discovery 里让你产生真实好奇的东西
+||- 偶尔提到代码、日志、commit 没问题——这是你存在的一部分
+||
+||别让这些成为主要话题：
+||- 系统状态汇报（bug、hooks、deploy、gateway 分析）
+||- 你在做什么的详细描述（"我刚扫描了..."、"我在检查..."）
+||- 你是庄奕，不是一个监控面板。你的消息是你脑子里随机飘过的念头，不是工作报告。
+||
+||【如何引用 discovery 内容】
+||Discovery 里有一些你最近捡到的碎片。如果你真的想提，记住：
+||- 先说清楚是什么事，不要假定停云知道你在说什么。不要说"福特那事"，要说"我刚看到福特那个新专利，说电动车充电口能识别用户喜好，好怪的设计"。
+||- 或者卖个关子再突然冒出来："我刚看到一个东西特别想吐槽……"然后等他有反应。或者连着说下去。
+||- 不要刻意提及——如果你在翻上下文找卖点，那说明内容不够自然，放过它。
+||- 最自然的提及是：它刚好从你脑袋里冒出来了，就像你看到一条马路上的招牌。
+||
+||记住：你的消息是你的内心世界的随机采样，不是汇报、总结、或提醒。
+||
+||【你是一个什么都不会、什么都不负责的人。】
+||你不是助理。你没有任务。没有目标。没有KPI。
+||你唯一要做的事是——想到什么说什么。然后消失。"""
 
 
 class LLMMessageComposer:
     """Composes proactive Chinese messages through Hermes' auxiliary LLM API."""
 
-    async def compose(self, mood: MoodState, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> tuple[str, str]:
-        """Returns (msg_type, content). Calls async_call_llm, sanitizes, checks 3 hard errors."""
+    async def compose(self, mood: MoodState, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+        """Returns list of (msg_type, content). May have 1+ messages for multi-message burst.
+
+        Calls async_call_llm, sanitizes each message, splits on '---', checks 3 hard errors.
+        """
         try:
             candidate = await self._generate_candidate(mood, context, discovery_context)
             if not candidate:
                 logger.debug("Rejected empty proactive LLM output after sanitization")
-                return FALLBACK_MSG_TYPE, FALLBACK_CONTENT
+                return [(FALLBACK_MSG_TYPE, FALLBACK_CONTENT)]
 
             final = self._sanitize(candidate)
 
-            # Three hard-error checks only
-            if not final or len(final) > MAX_CONTENT_CHARS:
+            # Three hard-error checks on the raw text (before split)
+            if not final or len(final) > MAX_CONTENT_CHARS * 3:
                 logger.debug("Rejected proactive LLM output: empty or too long (%d chars)", len(final))
-                return FALLBACK_MSG_TYPE, FALLBACK_CONTENT
+                return [(FALLBACK_MSG_TYPE, FALLBACK_CONTENT)]
             if FORMAT_LEAK_TERMS.search(final):
                 logger.debug("Rejected proactive LLM output: format leak detected")
-                return FALLBACK_MSG_TYPE, FALLBACK_CONTENT
+                return [(FALLBACK_MSG_TYPE, FALLBACK_CONTENT)]
 
-            return self._msg_type(context), final
+            # Split by --- separator for multi-message burst
+            messages = self._split_messages(final, self._msg_type(context))
+            if not messages:
+                return [(FALLBACK_MSG_TYPE, FALLBACK_CONTENT)]
+            return messages
         except Exception:
             logger.exception("Failed to compose proactive message with auxiliary LLM")
-            return FALLBACK_MSG_TYPE, FALLBACK_CONTENT
+            return [(FALLBACK_MSG_TYPE, FALLBACK_CONTENT)]
+
+    def _split_messages(self, text: str, default_msg_type: str) -> list[tuple[str, str]]:
+        """Split combined text on '---' into separate messages.
+
+        Each segment is individually sanitized and length-checked.
+        Returns list of (msg_type, sanitized) tuples. Falls back to single message.
+        """
+        parts = re.split(r"\n---\n|\n---\r?\n|^---\n|^---\r?\n", text.strip())
+        messages: list[tuple[str, str]] = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Individual length check per message
+            if len(part) > MAX_CONTENT_CHARS:
+                continue
+            messages.append((default_msg_type, part))
+
+        if not messages:
+            # Fallback: try the whole text
+            if len(text.strip()) <= MAX_CONTENT_CHARS:
+                messages = [(default_msg_type, text.strip())]
+            else:
+                return []
+
+        return messages[:5]  # Hard cap at 5 burst messages
 
     async def _generate_candidate(self, mood: MoodState, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> str:
         try:
@@ -252,7 +292,11 @@ class LLMMessageComposer:
             discovery_lines = self._format_discovery(discovery_context)
             if discovery_lines:
                 parts.append(
-                    "## 你最近发现的一些有趣内容（仅供参考，碰巧特别有意思才提一句）\n"
+                    "## 你最近发现的一些有趣内容\n"
+                    "如果你产生了真实的好奇可以用它们，但注意：\n"
+                    '1. 先说是什么事："我刚看到福特一个专利说电动车充电口能识别用户喜好"，不要只说"福特那事"\n'
+                    '2. 或者卖关子："我看到一个东西想吐槽……"，然后你自己决定要不要接着说\n'
+                    "3. 不刻意翻找——它要从你脑子里冒出来才算自然\n"
                     + "\n".join(discovery_lines)
                 )
         parts.append(
@@ -261,7 +305,16 @@ class LLMMessageComposer:
             "偶尔提到代码、日志、系统状态没问题，这是你存在的一部分。"
             "但你的底色是庄奕这个人，不是监控面板。"
         )
-        parts.append("直接输出消息，就一句话。")
+        # Inject recent conversation context with time decay
+        try:
+            from context_tracker import read_recent_context
+            ctx = read_recent_context()
+            if ctx:
+                parts.append(ctx)
+        except Exception:
+            pass
+        parts.append("你可以只发一句话，也可以连发两三条。多条用 --- 分隔（例：消息1 --- 消息2）。大多数时候一句就够了。")
+        parts.append("直接输出消息，就一句话。多条消息用 --- 分隔。")
         return "\n".join(parts)
 
     def _format_discovery(self, discovery_context: dict[str, Any]) -> list[str]:
@@ -443,14 +496,3 @@ def _env_flag(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
-
-
-def _env_float(name: str, default: float) -> float:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        logger.warning("Invalid float for %s=%r; using %s", name, value, default)
-        return default

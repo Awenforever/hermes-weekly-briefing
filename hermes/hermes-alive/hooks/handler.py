@@ -99,5 +99,12 @@ async def _on_agent_end(context: dict):
     except Exception:
         logger.exception("Failed to update mood on agent end")
 
+    # Capture recent conversation context for proactive injection
+    try:
+        from context_tracker import capture_recent_context
+        capture_recent_context()
+    except Exception:
+        logger.exception("Failed to capture recent context on agent end")
+
 def _env_enabled() -> bool:
     return os.getenv("HERMES_PROACTIVE_PLATFORM_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}

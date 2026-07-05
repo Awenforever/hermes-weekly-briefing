@@ -37,7 +37,7 @@ class MessageComposer:
         # Note: self.recent is in-memory only and resets on every restart/persistent loss
         self.recent: deque[str] = deque(maxlen=history_size)
 
-    def compose(self, mood: MoodState) -> tuple[str, str]:
+    def compose(self, mood: MoodState) -> list[tuple[str, str]]:
         candidates = [template for template in TEMPLATES if template.text not in self.recent] or TEMPLATES
         weighted = [(template, self._weight(template, mood)) for template in candidates]
         total = sum(weight for _, weight in weighted)
@@ -50,7 +50,7 @@ class MessageComposer:
                 chosen = template
                 break
         self.recent.append(chosen.text)
-        return chosen.msg_type, chosen.text
+        return [(chosen.msg_type, chosen.text)]
 
     def _weight(self, template: Template, mood: MoodState) -> float:
         multiplier = {
