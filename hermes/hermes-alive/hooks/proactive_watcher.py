@@ -9,8 +9,9 @@ import logging
 import os
 import sys
 # Hermes Alive import path bootstrap
-_HOOK_DIR = "/opt/data/hooks/hermes-alive"
-_SHARED_DIR = "/opt/data/hermes_alive_shared"
+# Hermes Alive import path bootstrap
+_HOOK_DIR = os.getenv("HERMES_HOOK_DIR", "/opt/data/hooks/hermes-alive")
+_SHARED_DIR = os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared")
 for _p in (_HOOK_DIR, _SHARED_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -48,7 +49,7 @@ LLM_ENABLED_ENV = "HERMES_PROACTIVE_LLM_ENABLED"
 LLM_MODEL_ENV = "HERMES_PROACTIVE_LLM_MODEL"
 DISCOVERY_ENABLED_ENV = "HERMES_PROACTIVE_DISCOVERY_ENABLED"
 
-BASE = Path("/opt/data/hermes_alive_shared")
+BASE = Path(os.getenv("HERMES_HOME", "/opt/data")) / "hermes_alive_shared"
 WATCHER_LOCK = BASE / "locks" / "proactive_watcher.lock"
 PROACTIVE_LOG = BASE / "proactive_log.jsonl"
 CONTROL = BASE / "control.json"
@@ -118,15 +119,10 @@ class ProactivePlatformWatcher:
             self._log("skip", tick_id=tick_id, reason="disabled")
             return False
 
-        chat_id = self.weixin_chat_id
-        if not chat_id:
-            self._log("skip", tick_id=tick_id, reason="missing_chat_id")
-            logger.warning("%s is required when proactive platform watcher is enabled", CHAT_ID_ENV)
-            return False
-
-        adapter = self._weixin_adapter()
-        if adapter is None:
-            self._log("skip", tick_id=tick_id, reason="adapter_unavailable")
+        # Resolve adapter and chat_id: try weixin first, then any available platform
+        adapter, chat_id = self._resolve_adapter_and_chat_id()
+        if adapter is None or not chat_id:
+            self._log("skip", tick_id=tick_id, reason="adapter_or_chat_id_unavailable")
             return False
 
         control_sent = await self._process_control_queue(adapter, chat_id, tick_id)
@@ -188,7 +184,7 @@ class ProactivePlatformWatcher:
                 message_preview=redact_preview(content),
                 adapter_result="ok",
             )
-            logger.info("Sent proactive platform heartbeat to Weixin chat %s [%d/%d]", _redact_chat(chat_id), msg_index, msg_count)
+            logger.info("Sent proactive platform heartbeat to chat %s [%d/%d]", _redact_chat(chat_id), msg_index, msg_count)
 
             # Delay between messages (not after the last one)
             if msg_index < msg_count:
@@ -207,12 +203,26 @@ class ProactivePlatformWatcher:
         return _truthy(os.getenv(ENABLED_ENV))
 
     @property
-    def weixin_chat_id(self) -> str | None:
-        value = os.getenv(CHAT_ID_ENV)
-        if value is None:
-            return None
-        value = value.strip()
-        return value or None
+    def chat_id(self) -> str | None:
+        """Find the first available chat_id from any platform.
+
+        Iterates over all configured adapters and checks for corresponding
+        HERMES_PROACTIVE_{PLATFORM}_CHAT_ID env vars. Weixin takes priority
+        if both exist.
+        """
+        # Weixin always takes priority
+        weixin_candidate = os.getenv(CHAT_ID_ENV)
+        if weixin_candidate:
+            weixin_candidate = weixin_candidate.strip()
+            if weixin_candidate:
+                return weixin_candidate
+        # Fall back to other platforms
+        for key, _adapter in self.adapters.items():
+            platform = str(getattr(key, "value", key)).upper()
+            value = os.getenv(f"HERMES_PROACTIVE_{platform}_CHAT_ID", "").strip()
+            if value:
+                return value
+        return None
 
     @property
     def interval_seconds(self) -> float:
@@ -229,12 +239,35 @@ class ProactivePlatformWatcher:
         data = locked_read_json(CONTROL, {}, "control.lock")
         return data if isinstance(data, dict) else {}
 
-    def _weixin_adapter(self) -> Any | None:
+    def _resolve_adapter_and_chat_id(self) -> tuple[Any | None, str | None]:
+        """Resolve the first available adapter with a matching chat_id.
+
+        Weixin takes priority if both a weixin adapter exists and
+        HERMES_PROACTIVE_WEIXIN_CHAT_ID is set. Otherwise, iterate all
+        adapters in order, looking for HERMES_PROACTIVE_{PLATFORM}_CHAT_ID.
+        """
+        weixin_adapter: Any | None = None
         for key, adapter in self.adapters.items():
             key_value = getattr(key, "value", key)
             if key_value == "weixin":
-                return adapter
-        return None
+                weixin_adapter = adapter
+                continue
+            # Non-weixin platform: check env var
+            platform = str(key_value).upper()
+            chat_id = os.getenv(f"HERMES_PROACTIVE_{platform}_CHAT_ID", "").strip()
+            if chat_id:
+                logger.debug("Found adapter for platform=%s with configured chat_id", key_value)
+                return adapter, chat_id
+
+        # Try weixin last, so it overrides if both are available
+        if weixin_adapter is not None:
+            chat_id = os.getenv("HERMES_PROACTIVE_WEIXIN_CHAT_ID", "").strip()
+            if chat_id:
+                logger.debug("Found weixin adapter with configured chat_id")
+                return weixin_adapter, chat_id
+
+        logger.warning("No adapter with a configured HERMES_PROACTIVE_{PLATFORM}_CHAT_ID found")
+        return None, None
 
     async def _process_control_queue(self, adapter: Any, chat_id: str, tick_id: str) -> bool:
         if not QUEUE.exists():

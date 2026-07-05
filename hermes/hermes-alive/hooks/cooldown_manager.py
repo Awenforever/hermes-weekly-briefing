@@ -13,7 +13,8 @@ from datetime import datetime, time
 from pathlib import Path
 from typing import Callable
 
-_SHARED_DIR = "/opt/data/hermes_alive_shared"
+_HERMES_HOME = os.getenv("HERMES_HOME", "/opt/data")
+_SHARED_DIR = os.getenv("HERMES_ALIVE_SHARED_DIR", os.path.join(os.getenv("HERMES_HOME", "/opt/data"), "hermes_alive_shared"))
 if _SHARED_DIR not in sys.path:
     sys.path.insert(0, _SHARED_DIR)
 
@@ -21,7 +22,8 @@ from safe_io import locked_read_json, locked_write_json
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STATE_PATH = Path("/opt/data/hermes_alive_shared/cooldown.json")
+HERMES_HOME = os.getenv("HERMES_HOME", "/opt/data")
+DEFAULT_STATE_PATH = Path(os.path.join(HERMES_HOME, "hermes_alive_shared", "cooldown.json"))
 COOLDOWN_LOCK_NAME = "cooldown.lock"
 
 

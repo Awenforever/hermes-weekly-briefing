@@ -7,8 +7,8 @@ Commands:
   alive_control.py disable
   alive_control.py test
 
-This script controls the gateway watcher through /opt/data/hermes_alive_shared/control.json.
-It also reads /opt/data/.env for accurate status display.
+This script controls the gateway watcher through $HERMES_HOME/hermes_alive_shared/control.json.
+It also reads $HERMES_HOME/.env for accurate status display.
 """
 
 from __future__ import annotations
@@ -20,14 +20,16 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-_SHARED_DIR = "/opt/data/hermes_alive_shared"
+_HERMES_HOME = os.getenv("HERMES_HOME", "/opt/data")
+_SHARED_DIR = os.getenv("HERMES_ALIVE_SHARED_DIR", os.path.join(os.getenv("HERMES_HOME", "/opt/data"), "hermes_alive_shared"))
 if _SHARED_DIR not in sys.path:
     sys.path.insert(0, _SHARED_DIR)
 
 from safe_io import locked_read_json, locked_write_json, append_jsonl, read_json, atomic_write_text
 
-BASE = Path("/opt/data/hermes_alive_shared")
-ENV_FILE = Path("/opt/data/.env")
+HERMES_HOME = Path(os.getenv("HERMES_HOME", "/opt/data"))
+BASE = HERMES_HOME / "hermes_alive_shared"
+ENV_FILE = HERMES_HOME / ".env"
 CONTROL = BASE / "control.json"
 QUEUE = BASE / "control_queue.jsonl"
 COOLDOWN = BASE / "cooldown.json"

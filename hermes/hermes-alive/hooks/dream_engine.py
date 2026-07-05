@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 # The main Weixin session prefix to filter by (same as context_tracker.py)
 WEIXIN_SESSION_PREFIX = "agent:main:weixin:dm:"
-STATE_DB_PATH = "/opt/data/state.db"
+HERMES_HOME = os.getenv("HERMES_HOME", "/opt/data")
+STATE_DB_PATH = os.getenv("HERMES_STATE_DB", os.path.join(HERMES_HOME, "state.db"))
 
 
 def _now_iso() -> str:
@@ -58,8 +59,8 @@ class DreamEngine:
 
     def __init__(self, diff_path: str | None = None) -> None:
         self._diff_path = diff_path or os.getenv(
-            "DREAM_DIFF_PATH", "/opt/data/hermes_alive_shared/dream_diff.json"
-        )
+                    "DREAM_DIFF_PATH", os.path.join(os.getenv("HERMES_HOME", "/opt/data"), "hermes_alive_shared", "dream_diff.json")
+                )
 
     def should_run(self) -> bool:
         if not _dream_enabled():
@@ -128,7 +129,7 @@ class DreamEngine:
         # Read MEMORY.md
         memory_paths = [
             os.getenv("HERMES_HOME", "/opt/data") + "/memories/MEMORY.md",
-            "/opt/data/memories/MEMORY.md",
+            os.getenv("HERMES_HOME", "/opt/data") + "/memories/MEMORY.md",
         ]
         for mp in memory_paths:
             try:
@@ -413,7 +414,7 @@ class DreamEngine:
         """Find the actual MEMORY.md path."""
         candidates = [
             os.getenv("HERMES_HOME", "/opt/data") + "/memories/MEMORY.md",
-            "/opt/data/memories/MEMORY.md",
+            os.getenv("HERMES_HOME", "/opt/data") + "/memories/MEMORY.md",
         ]
         for p in candidates:
             if os.path.isfile(p):

@@ -84,7 +84,7 @@ async def _on_session_start(context: dict):
         engine = MoodEngine()
         engine.on_interaction_start()
         desc = engine.get_mood_description()
-        mood_file = Path("/opt/data/hermes_alive_shared/current_mood.txt")
+        mood_file = Path(os.getenv("HERMES_HOME", "/opt/data")) / "hermes_alive_shared" / "current_mood.txt"
         atomic_write_text(mood_file, f"庄奕当前状态: {desc}")
         logger.info("Mood updated on session start: %s", desc)
     except Exception:

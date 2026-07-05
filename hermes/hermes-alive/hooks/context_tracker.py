@@ -33,7 +33,8 @@ CONTEXT_FILE = SHARED_DIR / "recent_context.json"
 WEIXIN_SESSION_PREFIX = "agent:main:weixin:dm:"
 
 # Path to the session state database
-STATE_DB = Path(os.getenv("HERMES_STATE_DB", "/opt/data/state.db"))
+HERMES_HOME = os.getenv("HERMES_HOME", "/opt/data")
+STATE_DB = Path(os.getenv("HERMES_STATE_DB", os.path.join(HERMES_HOME, "state.db")))
 
 
 def freshness_decay(seconds_ago: float) -> float:
