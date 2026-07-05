@@ -51,6 +51,19 @@
     "use_count": 2,
     "view_count": 2
   },
+  "autonomous-ai-agents/codex": {
+    "archived_at": null,
+    "created_at": "2026-07-05T11:06:30.443034+00:00",
+    "created_by": null,
+    "last_patched_at": null,
+    "last_used_at": "2026-07-05T11:06:30.448488+00:00",
+    "last_viewed_at": "2026-07-05T11:06:30.443048+00:00",
+    "patch_count": 0,
+    "pinned": false,
+    "state": "active",
+    "use_count": 1,
+    "view_count": 1
+  },
   "claude-code": {
     "archived_at": null,
     "created_at": "2026-07-04T16:57:57.530854+00:00",
@@ -69,13 +82,13 @@
     "created_at": "2026-07-02T07:21:20.352439+00:00",
     "created_by": null,
     "last_patched_at": "2026-07-05T11:00:40.376712+00:00",
-    "last_used_at": "2026-07-05T10:56:33.372305+00:00",
-    "last_viewed_at": "2026-07-05T10:56:33.367254+00:00",
+    "last_used_at": "2026-07-05T11:05:34.579813+00:00",
+    "last_viewed_at": "2026-07-05T11:05:34.574333+00:00",
     "patch_count": 27,
     "pinned": false,
     "state": "active",
-    "use_count": 18,
-    "view_count": 18
+    "use_count": 19,
+    "view_count": 19
   },
   "generate-pdf-with-cjk": {
     "archived_at": null,
@@ -159,14 +172,14 @@
     "archived_at": null,
     "created_at": "2026-07-04T09:09:27.019239+00:00",
     "created_by": "agent",
-    "last_patched_at": "2026-07-04T09:11:16.286454+00:00",
-    "last_used_at": "2026-07-04T09:11:37.002453+00:00",
-    "last_viewed_at": "2026-07-04T09:11:36.996929+00:00",
-    "patch_count": 1,
+    "last_patched_at": "2026-07-05T11:09:25.553283+00:00",
+    "last_used_at": "2026-07-05T11:05:34.584351+00:00",
+    "last_viewed_at": "2026-07-05T11:05:34.583076+00:00",
+    "patch_count": 2,
     "pinned": false,
     "state": "active",
-    "use_count": 1,
-    "view_count": 1
+    "use_count": 2,
+    "view_count": 2
   },
   "hermes-hooks-development": {
     "archived_at": null,

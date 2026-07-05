@@ -162,6 +162,64 @@ git checkout <backup-commit-sha> -- hooks/<hook-name>/
 
 ## Hook-Specific Gotchas
 
+### Pipeline Logging: Log Stages, Not Just Outcomes
+
+Critical lesson: always log intermediate pipeline stages with a shared correlation ID, not just the final outcome. Without this, every sent message is a black box — you can see *what* happened but not *why*.
+
+**Wrong (only final outcome):**
+```
+{"decision": "sent", "message_preview": "仙女座星系..."}
+```
+
+**Right (full pipeline trace):**
+```
+{"decision": "discovery", "tick_id": "abc123", "sources": ["arxiv","hn"], "external_count": 5}
+{"decision": "compose",   "tick_id": "abc123", "mood": {"energy":0.6}, "model": "deepseek"}
+{"decision": "sent",      "tick_id": "abc123", "message_preview": "仙女座..."}
+```
+
+**Implementation pattern:**
+```python
+# In your watcher's tick_impl, log each stage with shared tick_id:
+async def _tick_impl(self, tick_id: str):
+    ctx = await self._check_discovery()
+    if ctx:
+        self._log_discovery(tick_id, ctx)  # sources, item counts
+
+    msg_type, content, model = await self._compose_message(mood, ctx)
+    self._log_compose(tick_id, mood, ctx, msg_type, model)  # mood, model
+
+    await adapter.send(chat_id, content)
+    self._log("sent", tick_id=tick_id, ...)
+
+def _log_discovery(self, tick_id, ctx):
+    sources = {}
+    for item in ctx.get("external", []):
+        src = item.get("source", "unknown")
+        sources[src] = sources.get(src, 0) + 1
+    self._log("discovery", tick_id=tick_id,
+              external_count=len(ctx.get("external", [])),
+              sources=list(sources.keys()),
+              source_counts=sources)
+
+def _log_compose(self, tick_id, mood, ctx, msg_type, model):
+    from mood_engine import DIMENSIONS
+    snapshot = {dim: round(getattr(mood, dim, 0.0), 2) for dim in DIMENSIONS}
+    self._log("compose", tick_id=tick_id, model=model,
+              msg_type=msg_type, mood=snapshot,
+              had_discovery=ctx is not None)
+```
+
+**Why it matters:** When a message fires, grep the shared tick_id and reconstruct: discovery → mood → model → content. Without it, you're debugging blind.
+
+### Log Rotation for Production Hooks
+
+JSONL logs grow unbounded. Add rotation that runs on watcher startup. See `references/log-rotation-pattern.md` for the full `log_rotate.py` module — daily rotation to dated archives, auto-purge beyond retention days, wired via `rotate_proactive_log(BASE)` call before `self._log("start", ...)`.
+
+### Log Query Tool
+
+Provide a CLI for structured JSONL logs. See `references/pipeline-log-query-tool.md` for the full `logs.py` implementation — supports `--decision`, `--since/--until`, `--reason`, `--stats`, `--preview`, `--json`, `--tail`.
+
 ### gateway:startup hooks
 
 - Fires exactly once, at gateway process start.
