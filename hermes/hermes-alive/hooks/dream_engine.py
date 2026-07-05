@@ -264,7 +264,7 @@ class DreamEngine:
                 ],
                 temperature=0.3,
                 max_tokens=1000,
-                timeout=30,
+                timeout=60,
             )
         except Exception:
             logger.exception("Dream LLM call failed")

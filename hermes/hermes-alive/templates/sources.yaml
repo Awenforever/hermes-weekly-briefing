@@ -44,7 +44,7 @@ sources:
   playwright:
     enabled: true
     max_pages_per_run: 5
-    timeout_seconds: 20
+    timeout_seconds: 30
     delay_between_pages: 2.0
     sites:
       - name: "Hacker News"

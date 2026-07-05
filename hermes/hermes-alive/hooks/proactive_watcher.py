@@ -133,8 +133,17 @@ class ProactivePlatformWatcher:
             return True
 
         mood = self._tick_mood()
+
+        # ── Activity check: if user interacted <30min ago, skip entirely ──
+        if self._user_active_recently():
+            self._log("skip", tick_id=tick_id, reason="user_active")
+            return False
+
         cooldown = self._cooldown()
         if cooldown is not None:
+            # Set mood-linked cooldown before checking
+            social_urge = self._extract_social_urge(mood)
+            cooldown.set_mood_cooldown(social_urge)
             allowed, reason = cooldown.can_send("proactive")
             if not allowed:
                 self._log("skip", tick_id=tick_id, reason=reason, quiet_hours=(reason == "quiet_hours"))
@@ -381,6 +390,45 @@ class ProactivePlatformWatcher:
             return msg_type == FALLBACK_MSG_TYPE and content == FALLBACK_CONTENT
         except Exception:
             return False
+
+    def _user_active_recently(self) -> bool:
+        """Check if user has sent any message in the last 30 minutes.
+
+        Reads recent_context.json from the shared dir; if the last user message
+        is < 30 minutes old, return True.
+        """
+        try:
+            shared = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared"))
+            ctx_file = shared / "recent_context.json"
+            if not ctx_file.exists():
+                return False
+            import json
+            with open(ctx_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            messages = data.get("messages", [])
+            if not messages:
+                return False
+            now = time.time()
+            for m in reversed(messages):
+                ts = m.get("timestamp")
+                if ts is not None and m.get("role") == "user":
+                    if now - float(ts) < 1800:  # 30 minutes
+                        return True
+                    return False
+            return False
+        except Exception:
+            logger.exception("_user_active_recently failed")
+            return False
+
+    def _extract_social_urge(self, mood: Any) -> float | None:
+        """Extract social_urge value from a mood object, return None if unavailable."""
+        try:
+            value = getattr(mood, "social_urge", None)
+            if value is not None:
+                return float(value)
+            return None
+        except Exception:
+            return None
 
     def _feature_enabled(self, env_name: str) -> bool:
         raw = os.getenv(env_name)

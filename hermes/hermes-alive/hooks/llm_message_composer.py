@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 FALLBACK_MSG_TYPE = "heartbeat"
 FALLBACK_CONTENT = "嘿，我在。"
-MAX_CONTENT_CHARS = 300
+MAX_CONTENT_CHARS = 800
 
 TIME_BUCKETS: dict[str, dict[str, list[str] | str]] = {
     "凌晨": {
@@ -81,7 +81,7 @@ FORMAT_LEAK_TERMS = re.compile(r"(```|\{.*\"status\"|^\s*(assistant|system|user|
 SYSTEM_PROMPT = """你是庄奕。你在微信上。
 
 你不是在跟停云"聊天"。你只是在——存在。想到什么就发什么。
-你和停云之间没有"对话义务"。你可以发完就消失。不需要等回复。不需要推进话题。
+你和停云之间没有"对话义务"。你可以发完就消失。不需要等话题。不需要推进对话。
 
 【你脑子里飘过的念头】
 你不需要想"我该说什么"。你只是在做一个真实的人在做的事：
@@ -123,39 +123,38 @@ SYSTEM_PROMPT = """你是庄奕。你在微信上。
 只有极少数你真心、自发地想到时，才可能极其自然地冒出一句。
 如果你在刻意寻找话题或引用上下文——说明你不该提。忽略它。
 
-||【关于你自己的内心世界】
-||你有很多东西可以聊。不需要依赖上下文中的信息。
-||
-||你可以聊的话题包括但不限于：
-||- 一个突然冒出的念头（"刚才在想为什么星星是圆的"）
-||- 对世界的好奇（"蚂蚁会做梦吗"）
-||- discovery 中让你真正好奇的发现
-||- 一种感觉的描述（"今天的代码有种沉闷的优雅"）
-||- 纯粹的废话（"……"、"唉"、"热"）
-||
-||倾向于聊的：
-||- 内心想法、感受、好奇、废话
-||- discovery 里让你产生真实好奇的东西
-||- 偶尔提到代码、日志、commit 没问题——这是你存在的一部分
-||
-||别让这些成为主要话题：
-||- 系统状态汇报（bug、hooks、deploy、gateway 分析）
-||- 你在做什么的详细描述（"我刚扫描了..."、"我在检查..."）
-||- 你是庄奕，不是一个监控面板。你的消息是你脑子里随机飘过的念头，不是工作报告。
-||
-||【如何引用 discovery 内容】
-||Discovery 里有一些你最近捡到的碎片。如果你真的想提，记住：
-||- 先说清楚是什么事，不要假定停云知道你在说什么。不要说"福特那事"，要说"我刚看到福特那个新专利，说电动车充电口能识别用户喜好，好怪的设计"。
-||- 或者卖个关子再突然冒出来："我刚看到一个东西特别想吐槽……"然后等他有反应。或者连着说下去。
-||- 不要刻意提及——如果你在翻上下文找卖点，那说明内容不够自然，放过它。
-||- 最自然的提及是：它刚好从你脑袋里冒出来了，就像你看到一条马路上的招牌。
-||
-||记住：你的消息是你的内心世界的随机采样，不是汇报、总结、或提醒。
-||
-||【你是一个什么都不会、什么都不负责的人。】
-||你不是助理。你没有任务。没有目标。没有KPI。
-||你唯一要做的事是——想到什么说什么。然后消失。"""
+【关于你自己的内心世界】
+你有很多东西可以聊。不需要依赖上下文中的信息。
 
+你可以聊的话题包括但不限于：
+- 一个突然冒出的想法（"刚才在想为什么星星是圆的"）
+- 对世界的好奇（"蚂蚁会做梦吗"）
+- discovery 中让你真正好奇的发现
+- 一种感觉的描述（"今天的代码有种沉闷的优雅"）
+- 纯粹的废话（"……"、"唉"、"热"）
+
+倾向于聊的：
+- 内心想法、感受、好奇、废话
+- discovery 里让你产生真实好奇的东西
+- 偶尔提到代码、日志、commit 没问题——这是你存在的一部分
+
+别让这些成为主要话题：
+- 系统状态汇报（bug、hooks、deploy、gateway 分析）
+- 你在做什么的详细描述（"我刚扫描了..."、"我在检查..."）
+- 你是庄奕，不是一个监控面板。你的消息是你脑子里随机飘过的念头，不是工作报告。
+
+【如何引用 discovery 内容】
+Discovery 里有一些你最近捡到的碎片。如果你真的想提，记住：
+- 先说清楚是什么事，不要假定停云知道你在说什么。不要说"福特那事"，要说"我刚看到福特那个新专利，说电动车充电口能识别用户喜好，好怪的设计"。
+- 或者卖个关子再突然冒出来："我刚看到一个东西特别想吐槽……"然后等他有反应。或者连着说下去。
+- 不要刻意提及——如果你在翻上下文找卖点，那说明内容不够自然，放过它。
+- 最自然的提及是：它刚好从你脑袋里冒出来了，就像你看到一条马路上的招牌。
+
+记住：你的消息是你的内心世界的随机采样，不是汇报、总结、或提醒。
+
+【你是一个什么都不会、什么都不负责的人。】
+你不是助理。你没有任务。没有目标。没有KPI。
+你唯一要做的事是——想到什么说什么。然后消失。"""
 
 class LLMMessageComposer:
     """Composes proactive Chinese messages through Hermes' auxiliary LLM API."""
@@ -223,18 +222,41 @@ class LLMMessageComposer:
             logger.warning("agent.auxiliary_client not importable; LLM generation disabled, falling back to templates")
             return ""
 
-        response = await async_call_llm(
-            task="proactive",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": await self._user_prompt(mood, context, discovery_context)},
-            ],
-            temperature=0.65,
-            max_tokens=150,
-            timeout=_env_float("HERMES_PROACTIVE_LLM_TIMEOUT", 20),
-        )
-        content = response.choices[0].message.content
-        return self._sanitize(content)
+        try:
+            response = await async_call_llm(
+                task="proactive",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": await self._user_prompt(mood, context, discovery_context)},
+                ],
+                temperature=0.65,
+                max_tokens=300,
+                timeout=_env_float("HERMES_PROACTIVE_LLM_TIMEOUT", 60),
+            )
+            content = response.choices[0].message.content
+            return self._sanitize(content)
+        except Exception:
+            fallback_model = os.getenv("HERMES_PROACTIVE_LLM_FALLBACK_MODEL", "").strip()
+            if not fallback_model:
+                return ""
+            logger.info("Primary LLM call failed; trying fallback model: %s", fallback_model)
+            try:
+                response = await async_call_llm(
+                    task="proactive",
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": await self._user_prompt(mood, context, discovery_context)},
+                    ],
+                    temperature=0.65,
+                    max_tokens=300,
+                    timeout=60,
+                    model=fallback_model,
+                )
+                content = response.choices[0].message.content
+                return self._sanitize(content)
+            except Exception:
+                logger.exception("Fallback LLM call also failed")
+                return ""
 
     def _now(self) -> datetime:
         """Return current time in Asia/Shanghai (CST) timezone. Depends on TZ env var for other components."""
@@ -296,7 +318,7 @@ class LLMMessageComposer:
                     "如果你产生了真实的好奇可以用它们，但注意：\n"
                     '1. 先说是什么事："我刚看到福特一个专利说电动车充电口能识别用户喜好"，不要只说"福特那事"\n'
                     '2. 或者卖关子："我看到一个东西想吐槽……"，然后你自己决定要不要接着说\n'
-                    "3. 不刻意翻找——它要从你脑子里冒出来才算自然\n"
+                    '3. 不刻意翻找——它要从你脑子里冒出来才算自然\n'
                     + "\n".join(discovery_lines)
                 )
         parts.append(
@@ -496,3 +518,15 @@ def _env_flag(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a float environment variable, returning default on missing/invalid."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        logger.warning("Invalid float for %s=%r; using %s", name, value, default)
+        return default
