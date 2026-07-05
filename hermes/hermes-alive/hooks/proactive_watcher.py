@@ -32,6 +32,7 @@ from safe_io import (
     sha256_text,
     redact_preview,
     atomic_write_text,
+    file_lock,
 )
 
 logger = logging.getLogger(__name__)
@@ -238,32 +239,35 @@ class ProactivePlatformWatcher:
     async def _process_control_queue(self, adapter: Any, chat_id: str, tick_id: str) -> bool:
         if not QUEUE.exists():
             return False
-        try:
-            lines = QUEUE.read_text(encoding="utf-8").splitlines()
-        except Exception:
-            return False
-        if not lines:
-            return False
-        remaining: list[str] = []
-        sent_any = False
-        for line in lines:
+        from safe_io import LOCK_DIR
+        queue_lock = LOCK_DIR / "control_queue_process.lock"
+        with file_lock(queue_lock):
             try:
-                item = json.loads(line)
+                lines = QUEUE.read_text(encoding="utf-8").splitlines()
             except Exception:
-                continue
-            if item.get("type") == "test" and not sent_any:
-                content = str(item.get("message") or "Hermes Alive 主动推送测试。")
+                return False
+            if not lines:
+                return False
+            remaining: list[str] = []
+            sent_any = False
+            for line in lines:
                 try:
-                    await adapter.send(chat_id, content, metadata=self._metadata("hermes"))
-                    self._log("sent", tick_id=tick_id, reason="alive_test", msg_type="test", generated_by="hermes", message_hash=sha256_text(content), message_preview=redact_preview(content), adapter_result="ok")
-                    sent_any = True
-                except Exception as exc:
-                    self._log("error", tick_id=tick_id, reason="alive_test_send_failed", error=type(exc).__name__)
+                    item = json.loads(line)
+                except Exception:
+                    continue
+                if item.get("type") == "test" and not sent_any:
+                    content = str(item.get("message") or "Hermes Alive 主动推送测试。")
+                    try:
+                        await adapter.send(chat_id, content, metadata=self._metadata(item.get("generated_by", "hermes")))
+                        self._log("sent", tick_id=tick_id, reason="alive_test", msg_type="test", generated_by=item.get("generated_by", "hermes"), message_hash=sha256_text(content), message_preview=redact_preview(content), adapter_result="ok")
+                        sent_any = True
+                    except Exception as exc:
+                        self._log("error", tick_id=tick_id, reason="alive_test_send_failed", error=type(exc).__name__)
+                        remaining.append(line)
+                else:
                     remaining.append(line)
-            else:
-                remaining.append(line)
-        locked_write_json(BASE / "control_queue_state.json", {"last_processed_at": datetime.now().astimezone().isoformat()}, "control_queue.lock")
-        atomic_write_text(QUEUE, "\n".join(remaining) + ("\n" if remaining else ""))
+            locked_write_json(BASE / "control_queue_state.json", {"last_processed_at": datetime.now().astimezone().isoformat()}, "control_queue.lock")
+            atomic_write_text(QUEUE, "\n".join(remaining) + ("\n" if remaining else ""))
         return sent_any
 
     def _heartbeat_message(self) -> str:
@@ -307,9 +311,11 @@ class ProactivePlatformWatcher:
         if self._feature_enabled(LLM_ENABLED_ENV):
             llm_result = await self._compose_llm_message(default_mood, discovery_context)
             if llm_result is not None and len(llm_result) > 0:
-                # Return list of (msg_type, content, generated_by)
-                return [(msg_type, content, self._llm_model_name()) for msg_type, content in llm_result]
-            logger.debug("LLM composer returned fallback; using template composer")
+                # Check if LLM result is actually a fallback
+                msg_type, content = llm_result[0]
+                if not self._is_llm_fallback(msg_type, content):
+                    return [(m_type, m_content, self._llm_model_name()) for m_type, m_content in llm_result]
+                logger.debug("LLM composer returned fallback; using template composer")
         msg_type, content = self._compose_template_message(default_mood)[0]
         return [(msg_type, content, "hermes")]
 
@@ -402,20 +408,22 @@ class ProactivePlatformWatcher:
             ctx_file = shared / "recent_context.json"
             if not ctx_file.exists():
                 return False
-            import json
-            with open(ctx_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            messages = data.get("messages", [])
-            if not messages:
+            data = locked_read_json(ctx_file, {}, "recent_context.lock")
+            if not isinstance(data, dict):
                 return False
-            now = time.time()
-            for m in reversed(messages):
-                ts = m.get("timestamp")
-                if ts is not None and m.get("role") == "user":
-                    if now - float(ts) < 1800:  # 30 minutes
-                        return True
+            last_ts = data.get("last_user_timestamp")
+            if last_ts is None:
+                # Legacy file — scan messages for the most recent user message
+                messages = data.get("messages", [])
+                if not messages:
                     return False
-            return False
+                now = time.time()
+                for m in reversed(messages):
+                    ts = m.get("timestamp")
+                    if ts is not None and m.get("role") == "user":
+                        return (now - float(ts)) < 1800
+                return False
+            return (time.time() - float(last_ts)) < 1800
         except Exception:
             logger.exception("_user_active_recently failed")
             return False
@@ -473,17 +481,17 @@ class ProactivePlatformWatcher:
 
     def _metadata(self, generated_by: str) -> dict[str, Any]:
         metadata = dict(SYSTEM_METADATA)
-        if generated_by and generated_by != "hermes":
-            metadata.update({
-                "actor": "model",
-                "source": "model",
-                "message_origin": "model",
-                "origin": "model",
-                "model_name": generated_by,
-                "resolved_model": generated_by,
-                "routed_model": generated_by,
-                "model": generated_by,
-            })
+        metadata.update({
+            "actor": "model",
+            "source": "model",
+            "message_origin": "model",
+            "origin": "model",
+            "model_name": generated_by,
+            "resolved_model": generated_by,
+            "routed_model": generated_by,
+            "model": generated_by,
+        })
+        metadata["is_system"] = True
         return metadata
 
     def _log(self, decision: str, **extra: Any) -> None:

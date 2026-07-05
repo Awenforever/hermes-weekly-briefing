@@ -16,6 +16,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
+from safe_io import locked_write_json
+
 logger = logging.getLogger(__name__)
 
 CST = timezone(timedelta(hours=8))
@@ -40,25 +42,28 @@ def freshness_decay(seconds_ago: float) -> float:
     Returns:
         weight: 0.0 (ignore) to 1.0 (highest relevance)
     """
-    if seconds_ago < 300:        # <5 minutes
-        return 1.0
-    elif seconds_ago < 3600:     # 5-60 minutes
-        return 0.6
-    elif seconds_ago < 10800:    # 1-3 hours
-        return 0.2
-    else:
+    import math
+    thirty_min = 1800       # 30 minutes in seconds
+    six_hours  = 21600      # 6 hours in seconds
+    duration   = six_hours - thirty_min  # 330 minutes = 19800 seconds
+
+    if seconds_ago < thirty_min:
+        # Activity check intercepts before reaching here, but keep safe default.
         return 0.0
+    if seconds_ago <= six_hours:
+        # Cosine decay from 1.0 to 0.0 over the 30min-6h window.
+        t = (seconds_ago - thirty_min) / duration  # normalized 0→1
+        return math.cos(math.pi / 2.0 * t)
+    return 0.0
 
 
 def freshness_label(seconds_ago: float) -> str:
     """Return a contextual label for the recency of a message."""
-    if seconds_ago < 300:
+    if seconds_ago < 1800:
         return "刚刚"
-    elif seconds_ago < 1800:
-        return "不久前"
-    elif seconds_ago < 3600:
+    elif seconds_ago < 7200:        # 30 min - 2 hours
         return "大约一小时前"
-    elif seconds_ago < 10800:
+    elif seconds_ago < 14400:       # 2 - 4 hours
         return "之前"
     else:
         return "更早"
@@ -103,6 +108,7 @@ def capture_recent_context() -> None:
 
         now = time.time()
         messages: list[dict[str, Any]] = []
+        last_user_ts: float | None = None
         for r in reversed(rows):  # chronological order
             ts = r["timestamp"]
             content = r["content"] or ""
@@ -110,10 +116,14 @@ def capture_recent_context() -> None:
             role = r["role"]
             if role not in ("user", "assistant"):
                 continue
+            # Track last user timestamp (for _user_active_recently check)
+            if role == "user":
+                if last_user_ts is None or ts > last_user_ts:
+                    last_user_ts = ts
             seconds_ago = now - ts
             weight = freshness_decay(seconds_ago)
             if weight == 0.0:
-                continue  # skip old messages entirely
+                continue  # skip very recent messages from LLM context
             messages.append({
                 "role": role,
                 "content": content[:500],  # cap content length
@@ -124,14 +134,15 @@ def capture_recent_context() -> None:
             })
 
         CONTEXT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        data = {
+        data: dict[str, Any] = {
             "captured_at": datetime.now(CST).isoformat(),
             "session_id": session_id,
             "message_count": len(messages),
             "messages": messages,
         }
-        with open(CONTEXT_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        if last_user_ts is not None:
+            data["last_user_timestamp"] = last_user_ts
+        locked_write_json(CONTEXT_FILE, data, "recent_context.lock")
         logger.info(
             "Context captured for session %s: %d messages (weights: %s)",
             session_id,

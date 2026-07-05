@@ -90,7 +90,8 @@ class DreamEngine:
             # ── P2: Apply high-confidence operations to memory and fact_store ──
             applied_ops = self._apply_operations(diff)
             if applied_ops > 0:
-                mark_applied(self._diff_path)
+                diff.applied = True
+                diff.applied_at = datetime.now(timezone.utc).isoformat()
                 diff.summary += f" Applied {applied_ops} high-confidence operation(s)."
 
             logger.info(
@@ -300,12 +301,24 @@ class DreamEngine:
         return "\n".join(parts)
 
     def _parse_dream_json(self, raw: str) -> list[dict]:
-        """Extract JSON operations from LLM response."""
+        """Extract JSON operations from LLM response.
+
+        Also extracts prune_candidates and summary fields into the operation list
+        as metadata operations prefixed with _prune_ and _summary for later use.
+        """
         try:
             # Try direct JSON
             data = json.loads(raw.strip())
             if isinstance(data, dict):
-                return data.get("operations", [])
+                ops = data.get("operations", [])
+                # Extract prune_candidates and summary as metadata operations
+                prunes = data.get("prune_candidates", [])
+                summary = data.get("summary", "")
+                if prunes:
+                    ops.append({"_type": "_prune_candidates", "prune_candidates": prunes})
+                if summary:
+                    ops.append({"_type": "_summary", "summary": summary})
+                return ops
             return []
         except json.JSONDecodeError:
             pass
@@ -317,7 +330,14 @@ class DreamEngine:
             try:
                 data = json.loads(match.group(1).strip())
                 if isinstance(data, dict):
-                    return data.get("operations", [])
+                    ops = data.get("operations", [])
+                    prunes = data.get("prune_candidates", [])
+                    summary = data.get("summary", "")
+                    if prunes:
+                        ops.append({"_type": "_prune_candidates", "prune_candidates": prunes})
+                    if summary:
+                        ops.append({"_type": "_summary", "summary": summary})
+                    return ops
             except json.JSONDecodeError:
                 pass
 

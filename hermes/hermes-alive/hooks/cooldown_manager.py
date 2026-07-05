@@ -104,8 +104,17 @@ class CooldownManager:
         if not isinstance(data, dict):
             return
         self.day = str(data.get("day") or self.day)
-        self.daily_count = int(data.get("daily_count") or 0)
-        self.type_counts = defaultdict(int, {str(k): int(v) for k, v in data.get("type_counts", {}).items()})
+        try:
+            self.daily_count = int(data.get("daily_count") or 0)
+        except (TypeError, ValueError):
+            self.daily_count = 0
+        default_type_counts: dict[str, int] = {}
+        for k, v in data.get("type_counts", {}).items():
+            try:
+                default_type_counts[str(k)] = int(v)
+            except (TypeError, ValueError):
+                default_type_counts[str(k)] = 0
+        self.type_counts = defaultdict(int, default_type_counts)
         raw_last_sent = data.get("last_sent")
         if raw_last_sent:
             try:

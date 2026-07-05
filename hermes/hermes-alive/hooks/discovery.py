@@ -144,13 +144,19 @@ class ExternalDiscovery:
         # Add 少数派 RSS if enabled
         if sources.get("sspai", {}).get("enabled", False):
             tasks["sspai"] = self._collect_sspai()
-        for source_name, task in tasks.items():
-            try:
-                items = await task
+
+        # Run all collectors concurrently with asyncio.gather
+        task_items = list(tasks.items())
+        coros = [task for _, task in task_items]
+        names = [name for name, _ in task_items]
+        gathered = await asyncio.gather(*coros, return_exceptions=True)
+        for source_name, result in zip(names, gathered):
+            if isinstance(result, Exception):
+                logger.exception("ExternalDiscovery[%s] failed: %s", source_name, result)
+            else:
+                items = result or []
                 results.extend(items)
                 logger.debug("ExternalDiscovery[%s]: %d items", source_name, len(items))
-            except Exception:
-                logger.exception("ExternalDiscovery[%s] failed", source_name)
 
         if self._session and not self._session.closed:
             await self._session.close()
@@ -1064,13 +1070,17 @@ class LocalDiscovery:
             "recent": self._scan_recent_files(),
         }
 
-        for name, task in tasks.items():
-            try:
-                items = await task
+        task_items = list(tasks.items())
+        coros = [task for _, task in task_items]
+        names = [name for name, _ in task_items]
+        gathered = await asyncio.gather(*coros, return_exceptions=True)
+        for name, result in zip(names, gathered):
+            if isinstance(result, Exception):
+                logger.exception("LocalDiscovery[%s] failed: %s", name, result)
+            else:
+                items = result or []
                 results.extend(items)
                 logger.debug("LocalDiscovery[%s]: %d items", name, len(items))
-            except Exception:
-                logger.exception("LocalDiscovery[%s] failed", name)
 
         return results
 
