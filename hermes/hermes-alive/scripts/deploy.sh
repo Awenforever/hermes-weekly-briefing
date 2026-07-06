@@ -165,7 +165,62 @@ print('All imports OK')
 " && log "Import chain OK" || warn "Import chain FAILED"
 }
 
-# ── 5. Cron creation (optional) ──────────────────────────────────────────
+# ── 5. Environment setup ─────────────────────────────────────────────────
+
+detect_timezone() {
+    local tz
+    tz=$(timedatectl show -p Timezone --value 2>/dev/null) || true
+    if [ -z "$tz" ]; then
+        tz=$(cat /etc/timezone 2>/dev/null) || true
+    fi
+    if [ -z "$tz" ]; then
+        tz=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||') || true
+    fi
+    echo "${tz:-Unknown}"
+}
+
+setup_env() {
+    local tz
+    tz=$(detect_timezone)
+    local env_file="/opt/data/.env"
+    
+    log "Detected timezone: $tz"
+    
+    if [ -f "$env_file" ] && grep -q "^HERMES_PROACTIVE_PLATFORM_ENABLED=" "$env_file" 2>/dev/null; then
+        log "Hermes Alive env vars already present in $env_file — skipping"
+        return
+    fi
+    
+    log "Adding Hermes Alive config to $env_file ..."
+    cat >> "$env_file" << EOF
+
+# ── Hermes Alive ─────────────────────────────────────────────────────────
+HERMES_PROACTIVE_PLATFORM_ENABLED=true
+HERMES_PROACTIVE_WEIXIN_CHAT_ID=<replace-with-your-chat-id>
+TZ=$tz
+VOICE_ENABLED=true
+HERMES_DREAM_ENABLED=true
+COOLDOWN_ENABLED=true
+HERMES_PROACTIVE_LLM_ENABLED=true
+HERMES_PROACTIVE_LLM_MODEL=deepseek-v4-flash-ascend
+HERMES_PROACTIVE_LLM_TIMEOUT=60
+HERMES_PROACTIVE_LLM_FALLBACK_MODEL=deepseek-v4-flash
+HERMES_PROACTIVE_DISCOVERY_ENABLED=true
+HERMES_PROACTIVE_DISCOVERY_INTERVAL_SECONDS=14400
+HERMES_DREAM_INTERVAL_HOURS=24
+HERMES_PROACTIVE_COOLDOWN_MINUTES=120
+HERMES_PROACTIVE_QUIET_START=0:30
+HERMES_PROACTIVE_QUIET_END=8:30
+PLAYWRIGHT_BROWSERS_PATH=/opt/data/.playwright-browsers
+# Optional — set your city for weather-aware messages:
+# HERMES_PROACTIVE_LAT=31.23
+# HERMES_PROACTIVE_LON=121.47
+EOF
+    warn "Please edit $env_file and set HERMES_PROACTIVE_WEIXIN_CHAT_ID"
+    warn "For weather: uncomment and set HERMES_PROACTIVE_LAT / HERMES_PROACTIVE_LON"
+}
+
+# ── 6. Cron creation (optional) ──────────────────────────────────────────
 
 create_cron() {
     log "Cron creation: use 'hermes cronjob create' tool in Hermes chat"
@@ -179,6 +234,7 @@ create_cron() {
 sync_files
 verify_files
 verify_import_chain
+setup_env
 
 if [[ "$1" == "--install-deps" ]]; then
     install_deps
