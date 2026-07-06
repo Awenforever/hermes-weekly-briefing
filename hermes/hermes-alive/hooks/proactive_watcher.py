@@ -128,7 +128,7 @@ class ProactivePlatformWatcher:
 
         voice = self._voice_state()
 
-        # ── Activity check: if user interacted <30min ago, skip entirely ──
+        # ── Activity check: suppress unless Hermes is idle and conversation is quiet ──
         if self._user_active_recently():
             self._log("skip", tick_id=tick_id, reason="user_active")
             return False
@@ -416,16 +416,21 @@ class ProactivePlatformWatcher:
         """Check if proactive message should be suppressed due to recent activity.
 
         Returns True (suppress) if ANY of:
+        - Hermes is currently processing a session
         - The last message is from the user (user is waiting for a reply)
         - The last message (from either side) was < 30 minutes ago
 
         Only allows proactive messages when the conversation is truly idle:
-        Hermes sent the last message AND the entire conversation has been
-        silent for 30+ minutes.  This prevents Alive from interrupting when
-        Hermes just replied after a long delay (e.g. slow LLM).
+        no session is running, Hermes sent the last message, and the entire
+        conversation has been silent for 30+ minutes.  This prevents Alive from
+        interrupting while Hermes is still working on a long task.
         """
         try:
-            from context_tracker import activity_snapshot
+            from context_tracker import activity_snapshot, is_session_busy
+
+            if is_session_busy():
+                logger.debug("Activity guard: session busy, suppressing")
+                return True
 
             snapshot = activity_snapshot(refresh=True)
             if not snapshot.get("has_context"):

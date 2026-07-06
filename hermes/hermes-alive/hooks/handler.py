@@ -79,6 +79,13 @@ async def _startup(context: dict):
 
 async def _on_session_start(context: dict):
     try:
+        from context_tracker import set_session_busy
+        set_session_busy()
+        logger.debug("Hermes Alive activity guard marked session busy")
+    except Exception:
+        logger.exception("Failed to mark session busy")
+
+    try:
         from safe_io import atomic_write_text
         from voice_engine import VoiceEngine
         engine = VoiceEngine()
@@ -90,6 +97,13 @@ async def _on_session_start(context: dict):
         logger.exception("Failed to update voice on session start")
 
 async def _on_agent_end(context: dict):
+    try:
+        from context_tracker import set_session_idle
+        set_session_idle()
+        logger.debug("Hermes Alive activity guard marked session idle")
+    except Exception:
+        logger.exception("Failed to mark session idle")
+
     # Capture recent conversation context for proactive injection
     captured = {}
     try:

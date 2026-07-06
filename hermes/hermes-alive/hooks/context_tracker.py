@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,6 +36,29 @@ WEIXIN_USER_ID = os.getenv("HERMES_PROACTIVE_WEIXIN_CHAT_ID", "").strip()
 
 HERMES_HOME = os.getenv("HERMES_HOME", "/opt/data")
 STATE_DB = Path(os.getenv("HERMES_STATE_DB", os.path.join(HERMES_HOME, "state.db")))
+
+_session_busy = False
+_session_busy_lock = threading.Lock()
+
+
+def set_session_busy() -> None:
+    """Mark the in-process Hermes agent session as running."""
+    global _session_busy
+    with _session_busy_lock:
+        _session_busy = True
+
+
+def set_session_idle() -> None:
+    """Mark the in-process Hermes agent session as idle."""
+    global _session_busy
+    with _session_busy_lock:
+        _session_busy = False
+
+
+def is_session_busy() -> bool:
+    """Return whether Hermes is currently processing a session in this process."""
+    with _session_busy_lock:
+        return _session_busy
 
 
 def freshness_decay(seconds_ago: float) -> float:
