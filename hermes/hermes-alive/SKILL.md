@@ -1,7 +1,7 @@
 ---
 name: hermes-alive
-description: "Hermes Alive — gateway-native proactive AI companion for WeChat. Auto-discovers content from 10 platforms, generates personality-driven Chinese messages via LLM, and consolidates memory through Claude Dreaming. One-command deploy: bash scripts/deploy.sh --all"
-version: 2.2.0
+description: "Hermes Alive — gateway-native proactive AI companion for WeChat. Evolves a per-user Personality Genome, discovers content, generates Chinese messages via LLM, and consolidates memory through Claude Dreaming. One-command deploy: bash scripts/deploy.sh --all"
+version: 2.3.0
 ---
 
 # Hermes Alive
@@ -36,10 +36,11 @@ Hermes Alive adds a persistent asyncio task to your Hermes gateway that:
 - **Context injection** — recent conversation injected into compose prompt with cosine freshness decay (30min–6h)
 - **Multi-message burst** — LLM can compose 1-5 messages with `---` separator, sent 2-5s apart like a real person
 - **Activity guard** — if user interacted <30min ago → skip entirely (no cooldown triggered, no message sent)
-- **Mood-linked cooldown** — dynamic spacing: `max(30, 120 - social_urge × 90)` min. Higher social_urge = more frequent messages
+- **Voice Genome** — per-user Personality Genome stored in `voice_state.json`, evolved from user style signals and dream findings
+- **Voice-linked cooldown** — dynamic spacing from independent `social_urge`: `max(30, 120 - social_urge × 90)` min
 - **Dream reads sessions** — real state.db transcripts, not just static MEMORY.md
 - **Dream auto-apply** — high-confidence (≥0.7) ops written directly to MEMORY.md (with backup)
-- **Dream affects mood** — energy boost on substantive dreams, social_urge dip on empty ones
+- **Dream affects voice** — high-confidence academic/leisure interests nudge the Personality Genome
 - **Content discovery** from 10 platforms — every 4h, with persistent disk cache and random sampling
 - **LLM fallback** — if primary model fails, retry with `HERMES_PROACTIVE_LLM_FALLBACK_MODEL`
 - **Discovery cache** — results persisted to `discovery_cache.json`, survives gateway restarts
@@ -51,12 +52,12 @@ Hook (gateway:startup) → ProactivePlatformWatcher (asyncio task)
   │
   tick() every 300s
   │
-  ├─ mood.tick()            → 5-dimensional emotional state
+  ├─ voice.load()           → per-user Personality Genome + social_urge
   ├─ activity guard         → skip if user talked <30min ago
-  ├─ cooldown.check()       → mood-linked dynamic spacing
+  ├─ cooldown.check()       → social_urge-linked dynamic spacing
   ├─ discovery.collect()    → 10 content sources (per 4h)
   ├─ dream.run_cycle()      → memory consolidation (per 24h)
-  └─ LLM.compose()          → System Prompt + mood + discovery + recent context
+  └─ LLM.compose()          → System Prompt + voice snapshot + discovery + recent context
        │
        └─ adapter.send()    → WeChat message(s)
 ```
@@ -78,7 +79,7 @@ Hook (gateway:startup) → ProactivePlatformWatcher (asyncio task)
 
 ### Dream Memory Consolidation
 
-4-phase Claude Dreaming cycle that reads real session transcripts, auto-applies high-confidence results, and shifts mood:
+4-phase Claude Dreaming cycle that reads real session transcripts, auto-applies high-confidence results, and shifts voice:
 
 1. **Orient** — read MEMORY.md + proactive_context.md + recent 3-5 session transcripts from state.db
 2. **Gather** — send dream prompt + all context to auxiliary LLM for analysis
@@ -86,8 +87,8 @@ Hook (gateway:startup) → ProactivePlatformWatcher (asyncio task)
 4. **Prune** — flag stale/low-trust entries
 
 Results auto-applied to MEMORY.md for confidence ≥ 0.7; lower-confidence ops logged only.
-Post-dream mood shift: energy +0.05~0.1 if dream had substance, social_urge -0.02 if empty.
-All logged to `proactive_log.jsonl` with `mood_after` snapshot.
+Post-dream voice shift: high-confidence academic interests reduce absurd humor; leisure interests soften formality and increase warmth.
+All logged to `proactive_log.jsonl` with `voice_after` snapshot.
 
 ## Files
 
@@ -103,10 +104,13 @@ hermes-alive/
 │   ├── context_tracker.py   ← Captures recent conversation for freshness injection
 │   ├── dream_engine.py      ← Memory consolidation
 │   ├── dream_prompt.py      ← Claude Dreaming prompt
-│   ├── mood_engine.py       ← 5-dim emotion
-│   ├── cooldown_manager.py  ← Rate limiting (time-based only)
+│   ├── voice_engine.py      ← Personality Genome + social_urge migration/evolution
+│   ├── cooldown_manager.py  ← Rate limiting + social_urge dynamic cooldown
+│   ├── dream_diff_store.py  ← Dream diff persistence
 │   ├── log_rotate.py        ← Daily log rotation + retention
-│   └── safe_io.py           ← Thread-safe file I/O helpers
+│   ├── safe_io.py           ← Thread-safe file I/O helpers
+│   ├── alive_control.py     ← Runtime lifecycle control (enable/disable/restart)
+│   └── __init__.py          ← Package marker
 ├── scripts/
 │   ├── deploy.sh            ← One-command setup
 │   ├── verify.sh            ← Health check
@@ -137,7 +141,7 @@ Key variables:
 | `HERMES_PROACTIVE_LLM_TIMEOUT` | 60 | LLM call timeout (seconds) |
 | `HERMES_DREAM_ENABLED` | false | Enable dream consolidation |
 | `HERMES_DREAM_INTERVAL_HOURS` | 24 | Hours between dreams |
-| `HERMES_PROACTIVE_COOLDOWN_MINUTES` | 120 | Base cooldown (adjusted by mood) |
+| `HERMES_PROACTIVE_COOLDOWN_MINUTES` | 120 | Base cooldown (adjusted by social_urge) |
 | `HERMES_PROACTIVE_DISCOVERY_INTERVAL_SECONDS` | 14400 | Discovery interval (4h) |
 | `HERMES_PROACTIVE_DISCOVERY_ENABLED` | true | Enable content discovery |
 | `HERMES_PROACTIVE_QUIET_START` | 0:30 | Quiet hours start |
@@ -145,7 +149,9 @@ Key variables:
 | `HERMES_ALIVE_LOG_RETENTION_DAYS` | 7 | Log archive retention |
 | `PLAYWRIGHT_BROWSERS_PATH` | `/opt/data/.playwright-browsers` | Chromium location |
 
-**Removed in v2.2**: `HERMES_PROACTIVE_ACTIVE_COOLDOWN_MINUTES` — replaced by activity guard (hard skip <30min) + mood-linked cooldown.
+**Removed in v2.2**: `HERMES_PROACTIVE_ACTIVE_COOLDOWN_MINUTES` — replaced by activity guard (hard skip <30min) + voice-linked cooldown.
+
+**Changed in v2.3**: `MOOD_ENABLED`/`COMPOSER_ENABLED`, `mood_engine.py`, and `message_composer.py` were removed. Use `VOICE_ENABLED=true`; old `mood_state.json` is migrated into `voice_state.json` on first load.
 
 ## Logging
 
@@ -172,7 +178,7 @@ python3 scripts/logs.py --decision error --json
 python3 scripts/logs.py --reason cooldown --tail 5
 ```
 
-Available filters: `--decision` (sent/skip/dream/discovery/compose/start/stop/error), `--since`, `--until`, `--reason`, `--tail N`, `--all`, `--preview`, `--stats`, `--json`.
+Available filters: `--decision` (sent/skip/dream/discovery/compose/voice_mutation/start/stop/error), `--voice`, `--since`, `--until`, `--reason`, `--tail N`, `--all`, `--preview`, `--stats`, `--json`.
 
 ## Pipeline Trace
 
@@ -220,10 +226,12 @@ Activity guard: if the most recent user message is <30min old, the entire tick i
 - **Playwright persistence** — Chromium must be on persistent volume (`/opt/data/.playwright-browsers`), Python package reinstalled after image rebuild
 - **Bilibili anti-bot** — needs full browser UA, not the discovery UA
 - **Activity guard vs cooldown** — <30min user activity → hard skip (no message, cooldown NOT advanced). 30min–6h → cosine context decay. >6h → no context.
-- **Mood-linked cooldown** — `set_mood_cooldown(social_urge)` must be called before `can_send()` each tick. Formula: `max(30, 120 − urge × 90)`.
+- **Voice-linked cooldown** — `set_mood_cooldown(social_urge)` must be called before `can_send()` each tick. Formula: `max(30, 120 − urge × 90)`.
 - **LLM fallback** — primary model failure silently retries with `HERMES_PROACTIVE_LLM_FALLBACK_MODEL` (must be set in .env). Works via `async_call_llm(task="proactive", model=fallback_model, ...)`.
 - **Discovery cache** — persisted to `discovery_cache.json`. Survives restarts. Fresh data every 4h from both external + Playwright sources.
 - **`.env` is protected** — cannot modify from agent context. User must manually update `/opt/data/.env` for parameter changes.
+- **Stale __pycache__ after file deletion** — after deleting modules (mood_engine.py, message_composer.py), clear `__pycache__/` before restart. Stale `.pyc` files won't cause import failures (Python checks .py timestamps) but can confuse debugging.
+- **Migration guard against degraded state** — `mood_state.json` values decay toward 0 over time (mechanical tick decay). When migrating to voice_state.json, values below 0.08 are treated as meaningless and skipped — the voice genome uses freshly generated defaults instead. After successful migration, the old mood file is renamed to `.migrated` to prevent re-migration on subsequent restarts. If you see voice dimensions near 0 after first startup, check that the migration guard triggered correctly.
 
 ## Extending
 

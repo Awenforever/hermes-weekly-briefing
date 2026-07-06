@@ -15,7 +15,7 @@ from typing import Any
 
 CST = timezone(timedelta(hours=8))
 
-from mood_engine import DIMENSIONS, MoodState
+from voice_engine import VoiceGenome, format_voice_snapshot, relationship_stage_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -159,13 +159,13 @@ Discovery 里有一些你最近捡到的碎片。如果你真的想提，记住�
 class LLMMessageComposer:
     """Composes proactive Chinese messages through Hermes' auxiliary LLM API."""
 
-    async def compose(self, mood: MoodState, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+    async def compose(self, voice: VoiceGenome, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str]]:
         """Returns list of (msg_type, content). May have 1+ messages for multi-message burst.
 
         Calls async_call_llm, sanitizes each message, splits on '---', checks 3 hard errors.
         """
         try:
-            candidate = await self._generate_candidate(mood, context, discovery_context)
+            candidate = await self._generate_candidate(voice, context, discovery_context)
             if not candidate:
                 logger.debug("Rejected empty proactive LLM output after sanitization")
                 return [(FALLBACK_MSG_TYPE, FALLBACK_CONTENT)]
@@ -215,7 +215,7 @@ class LLMMessageComposer:
 
         return messages[:5]  # Hard cap at 5 burst messages
 
-    async def _generate_candidate(self, mood: MoodState, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> str:
+    async def _generate_candidate(self, voice: VoiceGenome, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> str:
         try:
             from agent.auxiliary_client import async_call_llm
         except ImportError:
@@ -226,8 +226,8 @@ class LLMMessageComposer:
             response = await async_call_llm(
                 task="proactive",
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": await self._user_prompt(mood, context, discovery_context)},
+                    {"role": "system", "content": self._system_prompt(voice)},
+                    {"role": "user", "content": await self._user_prompt(voice, context, discovery_context)},
                 ],
                 temperature=0.65,
                 max_tokens=300,
@@ -244,8 +244,8 @@ class LLMMessageComposer:
                 response = await async_call_llm(
                     task="proactive",
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": await self._user_prompt(mood, context, discovery_context)},
+                        {"role": "system", "content": self._system_prompt(voice)},
+                        {"role": "user", "content": await self._user_prompt(voice, context, discovery_context)},
                     ],
                     temperature=0.65,
                     max_tokens=300,
@@ -288,18 +288,42 @@ class LLMMessageComposer:
             pass
         return ""
 
-    async def _user_prompt(self, mood: MoodState, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> str:
+    def _system_prompt(self, voice: VoiceGenome) -> str:
+        try:
+            return SYSTEM_PROMPT + "\n\n" + format_voice_snapshot(voice)
+        except Exception:
+            return SYSTEM_PROMPT
+
+    async def _user_prompt(self, voice: VoiceGenome, context: dict[str, Any], discovery_context: dict[str, Any] | None = None) -> str:
         reason = str(context.get("trigger") or context.get("reason") or "自然想说句话")
         time_context = self._time_context()
         time_of_day = time_context["bucket"]
         weather = await _get_weather()
-        values = "\n".join(f"- {dim}: {getattr(mood, dim):.2f}" for dim in DIMENSIONS)
         user_context = self._read_proactive_context()
+        try:
+            stage_prompt = relationship_stage_prompt(voice)
+        except Exception:
+            stage_prompt = "你们还在自然相处。顺着已经出现的关系节奏说话，不要像问卷。"
+        voice_values = "\n".join(
+            f"- {dim}: {getattr(voice, dim):.2f}"
+            for dim in (
+                "verbosity",
+                "formality",
+                "humor_dry",
+                "humor_absurd",
+                "curiosity",
+                "warmth",
+                "quirkiness",
+                "emoji_usage",
+                "self_disclosure",
+            )
+        )
         parts = [
             "给停云发一条微信消息。像真人朋友，不是AI。",
             f"现在是{time_of_day}。",
             f"说话原因：{reason}",
-            f"心情：\n{values}",
+            f"关系阶段引导：{stage_prompt}",
+            f"声音倾向数值（仅供参考，不要解释）：\n{voice_values}",
         ]
         if user_context:
             parts.append(

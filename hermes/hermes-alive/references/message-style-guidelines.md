@@ -44,4 +44,4 @@ Current cooldown (120min) is purely time-based. Known limitation:
 - No distinction between "we were just chatting" and "nothing for hours"
 - Dream consolidation is time-scheduled, not experience-accumulated
 
-Future direction: experience-based triggers (mood delta, discovery volume, interaction recency) rather than fixed timers.
+Future direction: experience-based triggers (voice delta, discovery volume, interaction recency) rather than fixed timers.

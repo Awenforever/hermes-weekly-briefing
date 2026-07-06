@@ -3,7 +3,7 @@
 Wired into the proactive_watcher tick loop. Reads current memory state
 in Phase 1, sends a dream prompt to the auxiliary LLM in Phase 2–4,
 and produces a non-destructive DreamDiff for review. After diff generation,
-applies high-confidence operations to memory and fact_store, and adjusts mood.
+applies high-confidence operations to memory and fact_store, and evolves voice.
 
 Usage:
     engine = DreamEngine()
@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import random
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -100,8 +99,8 @@ class DreamEngine:
                 len(diff.operations), len(diff.prune_candidates), diff.summary,
             )
 
-            # ── P3: Dream mood adjustment ──
-            self._adjust_mood(diff)
+            # ── P3: Dream voice adjustment ──
+            self._adjust_voice(diff)
 
         except Exception:
             logger.exception("Dream cycle failed")
@@ -525,55 +524,33 @@ class DreamEngine:
 
         return 0
 
-    # ── P3: Dream mood adjustment ────────────────────────────────────────
+    # ── P3: Dream voice adjustment ───────────────────────────────────────
 
-    def _adjust_mood(self, diff: DreamDiff) -> None:
-        """Adjust mood after dream cycle completion.
-
-        - If dream had substantive changes (ops > 0): energy +0.05~0.1 (woke up refreshed)
-        - If dream ran empty (no changes): social_urge slightly down 0.02
-        - Additionally, randomly offset 1-2 dimensions
-        """
+    def _adjust_voice(self, diff: DreamDiff) -> None:
+        """Adjust voice from high-confidence dream findings only."""
         try:
-            from mood_engine import MoodEngine
+            from voice_engine import VoiceEngine
         except ImportError:
-            logger.debug("MoodEngine not available; skipping dream mood adjustment")
+            logger.debug("VoiceEngine not available; skipping dream voice adjustment")
             return
 
         try:
-            mood = MoodEngine()
-            has_changes = diff.has_changes()
-
-            if has_changes:
-                boost_amount = round(random.uniform(0.05, 0.1), 3)
-                mood.boost("energy", boost_amount)
-                logger.info("Dream mood: energy +%.3f (woke up refreshed)", boost_amount)
-            else:
-                mood.dampen("social_urge", 0.02)
-                logger.info("Dream mood: social_urge -0.02 (empty dream)")
-
-            # Randomly offset 1-2 dimensions by 0.01-0.05
-            dims = ["energy", "curiosity", "social_urge", "care", "mischief"]
-            n_dims = random.randint(1, 2)
-            chosen = random.sample(dims, n_dims)
-            for dim in chosen:
-                delta = round(random.uniform(-0.05, 0.05), 3)
-                if delta >= 0:
-                    mood.boost(dim, delta)
-                else:
-                    mood.dampen(dim, abs(delta))
-                logger.debug("Dream mood random offset: %s %+.3f", dim, delta)
-
-            mood_state = mood.state
-            diff.summary += (
-                f" Mood after dream: energy={mood_state.energy:.2f}, "
-                f"curiosity={mood_state.curiosity:.2f}, "
-                f"social_urge={mood_state.social_urge:.2f}, "
-                f"care={mood_state.care:.2f}, "
-                f"mischief={mood_state.mischief:.2f}."
-            )
+            voice = VoiceEngine()
+            applied = 0
+            for op in diff.operations:
+                confidence = float(op.get("confidence", 0.0))
+                if confidence < 0.7:
+                    continue
+                content = " ".join(str(op.get(k, "")) for k in ("content", "reason", "category", "entity"))
+                interest_type = _classify_interest(content)
+                if interest_type is None:
+                    continue
+                voice.on_dream_interest(interest_type, confidence, reason=str(op.get("reason", "")))
+                applied += 1
+            if applied:
+                diff.summary += f" Voice evolved from {applied} high-confidence dream interest(s)."
         except Exception:
-            logger.exception("Dream mood adjustment failed")
+            logger.exception("Dream voice adjustment failed")
 
     # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -585,3 +562,20 @@ class DreamEngine:
             except (ValueError, OSError):
                 pass
         return None
+
+
+def _classify_interest(text: str) -> str | None:
+    lowered = text.lower()
+    academic_terms = (
+        "paper", "论文", "研究", "学术", "arxiv", "dataset", "benchmark",
+        "实验", "模型", "算法", "theory", "method", "遥感", "remote sensing",
+    )
+    leisure_terms = (
+        "游戏", "电影", "音乐", "bilibili", "视频", "番剧", "小说", "休闲",
+        "旅行", "美食", "猫", "v2ex", "小红书", "生活",
+    )
+    if any(term in lowered for term in academic_terms):
+        return "academic"
+    if any(term in lowered for term in leisure_terms):
+        return "leisure"
+    return None

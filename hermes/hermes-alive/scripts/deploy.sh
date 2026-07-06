@@ -17,7 +17,35 @@ NC='\033[0m'
 log()  { echo -e "${GREEN}[✓]${NC} $1"; }
 warn() { echo -e "${RED}[!]${NC} $1"; }
 
-# ── 1. Verify file structure ─────────────────────────────────────────────
+# ── 1. Sync files from skill source to deploy locations ────────────────────
+
+SKILL_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SKILL_HOOKS="$SKILL_ROOT/hooks"
+
+sync_files() {
+    log "Syncing hooks to $HOOK_DIR..."
+    mkdir -p "$HOOK_DIR" "$SHARED_DIR"
+    
+    # Copy all hook Python files + HOOK.yaml
+    for f in "$SKILL_HOOKS"/*.py "$SKILL_HOOKS"/HOOK.yaml; do
+        [ -f "$f" ] || continue
+        cp "$f" "$HOOK_DIR/" && log "  $(basename "$f")"
+    done
+    
+    # Copy safe_io and sources.yaml to shared dir
+    cp "$SKILL_HOOKS/safe_io.py" "$SHARED_DIR/safe_io.py" && log "  safe_io.py → shared"
+    cp "$SKILL_ROOT/templates/sources.yaml" "$SHARED_DIR/sources.yaml" 2>/dev/null && log "  sources.yaml → shared"
+    
+    # Remove deprecated files from deploy dir
+    rm -f "$HOOK_DIR/mood_engine.py" "$HOOK_DIR/message_composer.py"
+    
+    # Clear pycache to force fresh imports
+    rm -rf "$HOOK_DIR/__pycache__"
+    
+    log "Sync complete"
+}
+
+# ── 2. Verify file structure ─────────────────────────────────────────────
 
 verify_files() {
     log "Verifying hook files..."
@@ -27,13 +55,12 @@ verify_files() {
         "$HOOK_DIR/proactive_watcher.py"
         "$HOOK_DIR/discovery.py"
         "$HOOK_DIR/llm_message_composer.py"
-        "$HOOK_DIR/message_composer.py"
+        "$HOOK_DIR/voice_engine.py"
         "$HOOK_DIR/cooldown_manager.py"
         "$HOOK_DIR/dream_engine.py"
         "$HOOK_DIR/dream_prompt.py"
         "$HOOK_DIR/dream_diff_store.py"
         "$SHARED_DIR/safe_io.py"
-        "$SHARED_DIR/mood_engine.py"
         "$SHARED_DIR/sources.yaml"
     )
     missing=0
@@ -89,9 +116,8 @@ HERMES_PROACTIVE_WEIXIN_CHAT_ID=<your-weixin-chat-id>
 HERMES_PROACTIVE_PLATFORM_INTERVAL_SECONDS=300
 
 # Subsystems
-MOOD_ENABLED=true
+VOICE_ENABLED=true
 COOLDOWN_ENABLED=true
-COMPOSER_ENABLED=true
 
 # LLM
 HERMES_PROACTIVE_LLM_ENABLED=true
@@ -129,6 +155,7 @@ from proactive_watcher import ProactivePlatformWatcher
 from discovery import DiscoveryEngine
 from dream_engine import DreamEngine
 from llm_message_composer import LLMMessageComposer
+from voice_engine import VoiceEngine
 print('All imports OK')
 " && log "Import chain OK" || warn "Import chain FAILED"
 }
@@ -144,6 +171,7 @@ create_cron() {
 
 # ── Main ─────────────────────────────────────────────────────────────────
 
+sync_files
 verify_files
 verify_import_chain
 

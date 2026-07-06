@@ -27,13 +27,12 @@ verify_files() {
         "$HOOK_DIR/proactive_watcher.py"
         "$HOOK_DIR/discovery.py"
         "$HOOK_DIR/llm_message_composer.py"
-        "$HOOK_DIR/message_composer.py"
+        "$HOOK_DIR/voice_engine.py"
         "$HOOK_DIR/cooldown_manager.py"
         "$HOOK_DIR/dream_engine.py"
         "$HOOK_DIR/dream_prompt.py"
         "$HOOK_DIR/dream_diff_store.py"
         "$SHARED_DIR/safe_io.py"
-        "$SHARED_DIR/mood_engine.py"
         "$SHARED_DIR/sources.yaml"
     )
     missing=0
@@ -89,9 +88,8 @@ HERMES_PROACTIVE_WEIXIN_CHAT_ID=<your-weixin-chat-id>
 HERMES_PROACTIVE_PLATFORM_INTERVAL_SECONDS=300
 
 # Subsystems
-MOOD_ENABLED=true
+VOICE_ENABLED=true
 COOLDOWN_ENABLED=true
-COMPOSER_ENABLED=true
 
 # LLM
 HERMES_PROACTIVE_LLM_ENABLED=true
@@ -129,6 +127,7 @@ from proactive_watcher import ProactivePlatformWatcher
 from discovery import DiscoveryEngine
 from dream_engine import DreamEngine
 from llm_message_composer import LLMMessageComposer
+from voice_engine import VoiceEngine
 print('All imports OK')
 " && log "Import chain OK" || warn "Import chain FAILED"
 }

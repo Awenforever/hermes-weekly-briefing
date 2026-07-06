@@ -1,6 +1,6 @@
 """Persistent send limits for Hermes Alive proactive messages.
 
-Supports quiet hours, minimum spacing (cooldown), and mood-linked dynamic cooldown.
+Supports quiet hours, minimum spacing (cooldown), and social_urge dynamic cooldown.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ COOLDOWN_LOCK_NAME = "cooldown.lock"
 
 
 class CooldownManager:
-    """Applies quiet hours, minimum spacing, and mood-linked dynamic cooldown."""
+    """Applies quiet hours, minimum spacing, and social_urge dynamic cooldown."""
 
     def __init__(self, state_path: Path | None = None, now_fn: Callable[[], datetime] | None = None) -> None:
         self.state_path = state_path or DEFAULT_STATE_PATH
@@ -42,7 +42,7 @@ class CooldownManager:
         self._reset_if_new_day()
 
     def set_mood_cooldown(self, social_urge: float | None) -> None:
-        """Set cooldown based on social_urge mood dimension.
+        """Set cooldown based on the independent social_urge dimension.
 
         cooldown = max(30, 120 - social_urge * 90)
         At social_urge=0.0 → 120min, at 1.0 → 30min.

@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
-from safe_io import locked_write_json
+from safe_io import file_lock, LOCK_DIR, locked_read_json, locked_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ MAX_MESSAGES = 20
 # Where to store context
 SHARED_DIR = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared"))
 CONTEXT_FILE = SHARED_DIR / "recent_context.json"
+PROACTIVE_LOG = SHARED_DIR / "proactive_log.jsonl"
 
 # The main Weixin session prefix to filter by
 WEIXIN_SESSION_PREFIX = "agent:main:weixin:dm:"
@@ -70,7 +71,7 @@ def freshness_label(seconds_ago: float) -> str:
         return "更早"
 
 
-def capture_recent_context() -> None:
+def capture_recent_context() -> dict[str, Any]:
     """Read the last N messages from state.db and write them to the shared JSON file.
 
     This is called from handler.py _on_agent_end().
@@ -89,7 +90,7 @@ def capture_recent_context() -> None:
         if row is None:
             logger.debug("No Weixin session found for context capture")
             conn.close()
-            return
+            return {}
 
         session_id = row["id"]
 
@@ -105,11 +106,13 @@ def capture_recent_context() -> None:
 
         if not rows:
             logger.debug("No messages found for context capture (session=%s)", session_id)
-            return
+            return {}
 
         now = time.time()
         messages: list[dict[str, Any]] = []
+        signal_messages: list[dict[str, Any]] = []
         last_user_ts: float | None = None
+        prev_user_ts: float | None = None
         for r in reversed(rows):  # chronological order
             ts = r["timestamp"]
             content = r["content"] or ""
@@ -117,9 +120,15 @@ def capture_recent_context() -> None:
             role = r["role"]
             if role not in ("user", "assistant"):
                 continue
+            signal_messages.append({
+                "role": role,
+                "content": content[:1000],
+                "timestamp": ts,
+            })
             # Track last user timestamp (for _user_active_recently check)
             if role == "user":
                 if last_user_ts is None or ts > last_user_ts:
+                    prev_user_ts = last_user_ts
                     last_user_ts = ts
             seconds_ago = now - ts
             weight = freshness_decay(seconds_ago)
@@ -143,6 +152,16 @@ def capture_recent_context() -> None:
         }
         if last_user_ts is not None:
             data["last_user_timestamp"] = last_user_ts
+            if prev_user_ts is not None:
+                data["previous_user_timestamp"] = prev_user_ts
+        try:
+            from voice_engine import extract_user_style_signals
+            signals = extract_user_style_signals(signal_messages)
+            if last_user_ts is not None and _sent_count_between(prev_user_ts, last_user_ts) >= 3:
+                signals["ignored_3_plus"] = True
+            data["user_style_signals"] = signals
+        except Exception:
+            logger.exception("Failed to extract user style signals")
         locked_write_json(CONTEXT_FILE, data, "recent_context.lock")
         logger.info(
             "Context captured for session %s: %d messages (weights: %s)",
@@ -150,10 +169,50 @@ def capture_recent_context() -> None:
             len(messages),
             [m["weight"] for m in messages],
         )
+        return data
 
     except Exception:
         logger.exception("Failed to capture recent context")
         # Don't let this crash the hook; it's best-effort
+        return {}
+
+
+def read_user_style_signals() -> dict[str, Any]:
+    """Return the latest extracted user style signals from recent_context.json."""
+    data = locked_read_json(CONTEXT_FILE, {}, "recent_context.lock")
+    if not isinstance(data, dict):
+        return {}
+    signals = data.get("user_style_signals", {})
+    return signals if isinstance(signals, dict) else {}
+
+
+def _sent_count_between(start_ts: float | None, end_ts: float) -> int:
+    if not PROACTIVE_LOG.exists():
+        return 0
+    count = 0
+    try:
+        with file_lock(LOCK_DIR / "proactive_log.lock"):
+            log_text = PROACTIVE_LOG.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return 0
+    for line in log_text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if item.get("decision") != "sent":
+            continue
+        try:
+            sent_ts = datetime.fromisoformat(str(item.get("time", ""))).timestamp()
+        except (TypeError, ValueError):
+            continue
+        if start_ts is not None and sent_ts <= start_ts:
+            continue
+        if sent_ts < end_ts:
+            count += 1
+    return count
 
 
 def read_recent_context() -> str:
@@ -165,13 +224,9 @@ def read_recent_context() -> str:
     if not CONTEXT_FILE.exists():
         return ""
 
-    try:
-        with open(CONTEXT_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        logger.exception("Failed to read recent context file")
+    data = locked_read_json(CONTEXT_FILE, {}, "recent_context.lock")
+    if not isinstance(data, dict):
         return ""
-
     messages = data.get("messages", [])
     if not messages:
         return ""

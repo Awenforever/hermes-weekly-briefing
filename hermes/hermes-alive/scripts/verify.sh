@@ -22,6 +22,7 @@ echo "Hook deployment:"
 [ -f "$HOOK_DIR/handler.py" ] && pass "handler.py" || fail "handler.py missing"
 [ -f "$HOOK_DIR/proactive_watcher.py" ] && pass "proactive_watcher.py" || fail "proactive_watcher.py missing"
 [ -f "$HOOK_DIR/discovery.py" ] && pass "discovery.py" || fail "discovery.py missing"
+[ -f "$HOOK_DIR/voice_engine.py" ] && pass "voice_engine.py" || fail "voice_engine.py missing"
 echo ""
 
 # 2. Check gateway loaded the hook
@@ -42,6 +43,7 @@ echo "Environment:"
 vars=(
     HERMES_PROACTIVE_PLATFORM_ENABLED
     HERMES_PROACTIVE_WEIXIN_CHAT_ID
+    VOICE_ENABLED
     HERMES_PROACTIVE_LLM_ENABLED
     HERMES_DREAM_ENABLED
     PLAYWRIGHT_BROWSERS_PATH

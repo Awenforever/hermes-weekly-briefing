@@ -79,32 +79,38 @@ async def _startup(context: dict):
 
 async def _on_session_start(context: dict):
     try:
-        from mood_engine import MoodEngine
         from safe_io import atomic_write_text
-        engine = MoodEngine()
-        engine.on_interaction_start()
-        desc = engine.get_mood_description()
-        mood_file = Path(os.getenv("HERMES_HOME", "/opt/data")) / "hermes_alive_shared" / "current_mood.txt"
-        atomic_write_text(mood_file, f"庄奕当前状态: {desc}")
-        logger.info("Mood updated on session start: %s", desc)
+        from voice_engine import VoiceEngine
+        engine = VoiceEngine()
+        engine.on_interaction_start(context if isinstance(context, dict) else {})
+        voice_file = Path(os.getenv("HERMES_HOME", "/opt/data")) / "hermes_alive_shared" / "current_voice.txt"
+        atomic_write_text(voice_file, engine.snapshot_prompt())
+        logger.info("Voice touched on session start: stage=%s", engine.genome.relationship_stage)
     except Exception:
-        logger.exception("Failed to update mood on session start")
+        logger.exception("Failed to update voice on session start")
 
 async def _on_agent_end(context: dict):
-    try:
-        from mood_engine import MoodEngine
-        engine = MoodEngine()
-        duration = context.get("duration_minutes", 1.0) if isinstance(context, dict) else 1.0
-        engine.on_interaction_end(duration, sentiment_hint=None)
-    except Exception:
-        logger.exception("Failed to update mood on agent end")
-
     # Capture recent conversation context for proactive injection
+    captured = {}
     try:
         from context_tracker import capture_recent_context
-        capture_recent_context()
+        captured = capture_recent_context()
     except Exception:
         logger.exception("Failed to capture recent context on agent end")
+
+    try:
+        from safe_io import atomic_write_text
+        from voice_engine import VoiceEngine
+        signals = {}
+        if isinstance(captured, dict):
+            signals = captured.get("user_style_signals", {}) if isinstance(captured.get("user_style_signals"), dict) else {}
+        engine = VoiceEngine()
+        engine.on_agent_end(signals)
+        voice_file = Path(os.getenv("HERMES_HOME", "/opt/data")) / "hermes_alive_shared" / "current_voice.txt"
+        atomic_write_text(voice_file, engine.snapshot_prompt())
+        logger.info("Voice evolved on agent end: stage=%s message_count=%s", engine.genome.relationship_stage, engine.message_count)
+    except Exception:
+        logger.exception("Failed to evolve voice on agent end")
 
 def _env_enabled() -> bool:
     return os.getenv("HERMES_PROACTIVE_PLATFORM_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}

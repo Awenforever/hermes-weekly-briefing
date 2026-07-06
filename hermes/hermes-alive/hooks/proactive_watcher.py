@@ -42,9 +42,8 @@ DEFAULT_INTERVAL_SECONDS = 300.0
 ENABLED_ENV = "HERMES_PROACTIVE_PLATFORM_ENABLED"
 CHAT_ID_ENV = "HERMES_PROACTIVE_WEIXIN_CHAT_ID"
 INTERVAL_ENV = "HERMES_PROACTIVE_PLATFORM_INTERVAL_SECONDS"
-MOOD_ENABLED_ENV = "MOOD_ENABLED"
+VOICE_ENABLED_ENV = "VOICE_ENABLED"
 COOLDOWN_ENABLED_ENV = "COOLDOWN_ENABLED"
-COMPOSER_ENABLED_ENV = "COMPOSER_ENABLED"
 LLM_ENABLED_ENV = "HERMES_PROACTIVE_LLM_ENABLED"
 LLM_MODEL_ENV = "HERMES_PROACTIVE_LLM_MODEL"
 DISCOVERY_ENABLED_ENV = "HERMES_PROACTIVE_DISCOVERY_ENABLED"
@@ -73,13 +72,11 @@ class ProactivePlatformWatcher:
     def __init__(self, adapters: Mapping[Any, Any], config: Any) -> None:
         self.adapters = adapters
         self.config = config
-        self._mood_engine: Any | None = None
+        self._voice_engine: Any | None = None
         self._cooldown_manager: Any | None = None
-        self._message_composer: Any | None = None
         self._llm_message_composer: Any | None = None
         self._discovery_engine: Any | None = None
         self._dream_engine: Any | None = None
-        self._last_mood_tick = time.monotonic()
         self.watcher_id = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
         self.started_at = datetime.now().astimezone().isoformat()
 
@@ -129,7 +126,7 @@ class ProactivePlatformWatcher:
         if control_sent:
             return True
 
-        mood = self._tick_mood()
+        voice = self._voice_state()
 
         # ── Activity check: if user interacted <30min ago, skip entirely ──
         if self._user_active_recently():
@@ -138,8 +135,8 @@ class ProactivePlatformWatcher:
 
         cooldown = self._cooldown()
         if cooldown is not None:
-            # Set mood-linked cooldown before checking
-            social_urge = self._extract_social_urge(mood)
+            # Set voice-linked cooldown before checking
+            social_urge = self._extract_social_urge(voice)
             cooldown.set_mood_cooldown(social_urge)
             allowed, reason = cooldown.can_send("proactive")
             if not allowed:
@@ -151,14 +148,14 @@ class ProactivePlatformWatcher:
         if discovery_context is not None:
             self._log_discovery(tick_id, discovery_context)
         await self._check_dream()
-        messages = await self._compose_message(mood, discovery_context)
+        messages = await self._compose_message(voice, discovery_context)
         if not messages:
             self._log("skip", tick_id=tick_id, reason="empty_messages")
             return False
 
         msg_count = len(messages)
         for msg_index, (msg_type, content, generated_by) in enumerate(messages, start=1):
-            self._log_compose(tick_id, mood, discovery_context, msg_type, generated_by)
+            self._log_compose(tick_id, voice, discovery_context, msg_type, generated_by)
 
             metadata = self._metadata(generated_by)
             try:
@@ -306,26 +303,17 @@ class ProactivePlatformWatcher:
     def _heartbeat_message(self) -> str:
         return "Hermes proactive platform heartbeat."
 
-    def _tick_mood(self) -> Any | None:
-        engine = self._mood()
-        if engine is None:
+    def _voice(self) -> Any | None:
+        if not self._feature_enabled(VOICE_ENABLED_ENV):
             return None
-        now = time.monotonic()
-        hours_elapsed = (now - self._last_mood_tick) / 3600
-        self._last_mood_tick = now
-        return engine.tick(hours_elapsed)
-
-    def _mood(self) -> Any | None:
-        if not self._feature_enabled(MOOD_ENABLED_ENV):
-            return None
-        if self._mood_engine is None:
+        if self._voice_engine is None:
             try:
-                from mood_engine import MoodEngine
-                self._mood_engine = MoodEngine()
+                from voice_engine import VoiceEngine
+                self._voice_engine = VoiceEngine()
             except Exception:
-                logger.exception("Failed to initialize mood engine")
-                self._mood_engine = False
-        return None if self._mood_engine is False else self._mood_engine
+                logger.exception("Failed to initialize voice engine")
+                self._voice_engine = False
+        return None if self._voice_engine is False else self._voice_engine
 
     def _cooldown(self) -> Any | None:
         if not self._feature_enabled(COOLDOWN_ENABLED_ENV):
@@ -339,20 +327,19 @@ class ProactivePlatformWatcher:
                 self._cooldown_manager = False
         return None if self._cooldown_manager is False else self._cooldown_manager
 
-    async def _compose_message(self, mood: Any | None = None, discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str, str]]:
-        default_mood = self._mood_state_or_default(mood)
+    async def _compose_message(self, voice: Any | None = None, discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str, str]]:
+        default_voice = self._voice_state_or_default(voice)
         if self._feature_enabled(LLM_ENABLED_ENV):
-            llm_result = await self._compose_llm_message(default_mood, discovery_context)
+            llm_result = await self._compose_llm_message(default_voice, discovery_context)
             if llm_result is not None and len(llm_result) > 0:
                 # Check if LLM result is actually a fallback
                 msg_type, content = llm_result[0]
                 if not self._is_llm_fallback(msg_type, content):
                     return [(m_type, m_content, self._llm_model_name()) for m_type, m_content in llm_result]
-                logger.debug("LLM composer returned fallback; using template composer")
-        msg_type, content = self._compose_template_message(default_mood)[0]
-        return [(msg_type, content, "hermes")]
+                logger.debug("LLM composer returned fallback; using heartbeat")
+        return [("heartbeat", self._heartbeat_message(), "hermes")]
 
-    async def _compose_llm_message(self, mood: Any, discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str]] | None:
+    async def _compose_llm_message(self, voice: Any, discovery_context: dict[str, Any] | None = None) -> list[tuple[str, str]] | None:
         if self._llm_message_composer is None:
             try:
                 from llm_message_composer import LLMMessageComposer
@@ -363,7 +350,7 @@ class ProactivePlatformWatcher:
         if self._llm_message_composer is False:
             return None
         try:
-            return await self._llm_message_composer.compose(mood, context={"trigger": self._dominant_mood(mood)}, discovery_context=discovery_context)
+            return await self._llm_message_composer.compose(voice, context={"trigger": self._dominant_voice(voice)}, discovery_context=discovery_context)
         except Exception:
             logger.exception("LLM message composer failed")
             self._llm_message_composer = False
@@ -394,32 +381,27 @@ class ProactivePlatformWatcher:
             return engine.get_recent()
         return None
 
-    def _compose_template_message(self, mood: Any) -> list[tuple[str, str]]:
-        if not self._feature_enabled(COMPOSER_ENABLED_ENV):
-            return [("heartbeat", self._heartbeat_message())]
-        if self._message_composer is None:
-            try:
-                from message_composer import MessageComposer
-                self._message_composer = MessageComposer()
-            except Exception:
-                logger.exception("Failed to initialize message composer")
-                self._message_composer = False
-        if self._message_composer is False:
-            return [("heartbeat", self._heartbeat_message())]
-        return self._message_composer.compose(mood)
-
-    def _mood_state_or_default(self, mood: Any | None) -> Any:
-        if mood is not None:
-            return mood
-        if not hasattr(self, "_default_mood_state"):
-            from mood_engine import MoodState
-            self._default_mood_state = MoodState()
-        return self._default_mood_state
-
-    def _dominant_mood(self, mood: Any) -> str:
+    def _voice_state(self) -> Any | None:
+        engine = self._voice()
+        if engine is None:
+            return None
         try:
-            from mood_engine import DIMENSIONS
-            return max(DIMENSIONS, key=lambda dim: getattr(mood, dim))
+            return engine.genome
+        except Exception:
+            return None
+
+    def _voice_state_or_default(self, voice: Any | None) -> Any:
+        if voice is not None:
+            return voice
+        if not hasattr(self, "_default_voice_genome"):
+            from voice_engine import VoiceGenome
+            self._default_voice_genome = VoiceGenome()
+        return self._default_voice_genome
+
+    def _dominant_voice(self, voice: Any) -> str:
+        try:
+            from voice_engine import STYLE_DIMENSIONS
+            return max(STYLE_DIMENSIONS, key=lambda dim: getattr(voice, dim))
         except Exception:
             return "proactive"
 
@@ -461,10 +443,11 @@ class ProactivePlatformWatcher:
             logger.exception("_user_active_recently failed")
             return False
 
-    def _extract_social_urge(self, mood: Any) -> float | None:
-        """Extract social_urge value from a mood object, return None if unavailable."""
+    def _extract_social_urge(self, voice: Any) -> float | None:
+        """Extract social_urge value from the voice engine, return None if unavailable."""
         try:
-            value = getattr(mood, "social_urge", None)
+            engine = self._voice()
+            value = getattr(engine, "social_urge", None)
             if value is not None:
                 return float(value)
             return None
@@ -497,18 +480,19 @@ class ProactivePlatformWatcher:
             try:
                 logger.debug("Running dream consolidation cycle")
                 diff = await engine.run_dream_cycle()
-                mood_after = {}
+                voice_after = {}
                 try:
-                    from mood_engine import MoodEngine, DIMENSIONS
-                    me = MoodEngine()
-                    mood_after = {dim: round(float(getattr(me.state, dim, 0.0)), 2) for dim in DIMENSIONS}
+                    from voice_engine import VoiceEngine, STYLE_DIMENSIONS
+                    ve = VoiceEngine()
+                    voice_after = {dim: round(float(getattr(ve.genome, dim, 0.0)), 2) for dim in STYLE_DIMENSIONS}
+                    voice_after["social_urge"] = round(float(ve.social_urge), 2)
                 except Exception:
                     pass
                 self._log("dream", reason="dream_cycle_complete",
                           ops=len(diff.operations),
                           prunes=len(diff.prune_candidates),
                           summary=diff.summary,
-                          mood_after=mood_after)
+                          voice_after=voice_after)
             except Exception:
                 logger.exception("Dream consolidation failed")
 
@@ -563,17 +547,20 @@ class ProactivePlatformWatcher:
     def _log_compose(
         self,
         tick_id: str,
-        mood: Any,
+        voice: Any,
         discovery_context: dict[str, Any] | None,
         msg_type: str,
         generated_by: str,
     ) -> None:
-        """Log compose context: mood snapshot, model, discovery availability, msg type."""
-        mood_snapshot: dict[str, float] = {}
-        if mood is not None:
+        """Log compose context: voice snapshot, model, discovery availability, msg type."""
+        voice_snapshot: dict[str, float] = {}
+        if voice is not None:
             try:
-                from mood_engine import DIMENSIONS
-                mood_snapshot = {dim: round(float(getattr(mood, dim, 0.0)), 2) for dim in DIMENSIONS}
+                from voice_engine import STYLE_DIMENSIONS
+                voice_snapshot = {dim: round(float(getattr(voice, dim, 0.0)), 2) for dim in STYLE_DIMENSIONS}
+                engine = self._voice()
+                if engine is not None:
+                    voice_snapshot["social_urge"] = round(float(getattr(engine, "social_urge", 0.0)), 2)
             except Exception:
                 pass
 
@@ -586,7 +573,7 @@ class ProactivePlatformWatcher:
             tick_id=tick_id,
             model=generated_by,
             msg_type=msg_type,
-            mood=mood_snapshot,
+            voice=voice_snapshot,
             had_discovery=had_discovery,
             discovery_items=external_n + local_n,
         )

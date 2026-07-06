@@ -38,9 +38,8 @@ The script must run without gateway or WeChat dependencies.
 |------|------|
 | `/opt/data/hooks/hermes-alive/llm_message_composer.py` | Message composition (LLM prompt, sanitize, compose) |
 | `/opt/data/hooks/hermes-alive/proactive_watcher.py` | Main loop, adapter discovery |
-| `/opt/data/hooks/hermes-alive/mood_engine.py` | Emotional state engine |
+| `/opt/data/hooks/hermes-alive/voice_engine.py` | Personality Genome + social_urge engine |
 | `/opt/data/hooks/hermes-alive/cooldown_manager.py` | Rate limiting + quiet hours |
-| `/opt/data/hooks/hermes-alive/message_composer.py` | Template-based composer (legacy fallback) |
 | `/opt/data/hooks/hermes-alive/handler.py` | Hook entry point |
 | `/opt/data/config.yaml` | Main config (auxiliary.proactive section) |
 | `/opt/data/.env` | Environment variables (PROACTIVE_*) |
