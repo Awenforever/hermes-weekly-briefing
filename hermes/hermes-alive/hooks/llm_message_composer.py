@@ -351,7 +351,7 @@ class LLMMessageComposer:
             "偶尔提到代码、日志、系统状态没问题，这是你存在的一部分。"
             "但你的底色是庄奕这个人，不是监控面板。"
         )
-        # Inject recent conversation context with time decay
+        # Inject recent conversation context from ContextQueue with time decay.
         try:
             from context_tracker import read_recent_context
             ctx = read_recent_context()

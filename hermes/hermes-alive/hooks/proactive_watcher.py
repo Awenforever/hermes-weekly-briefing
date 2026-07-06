@@ -423,40 +423,24 @@ class ProactivePlatformWatcher:
         Hermes sent the last message AND the user hasn't spoken in 30+ minutes.
         """
         try:
-            shared = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared"))
-            ctx_file = shared / "recent_context.json"
-            if not ctx_file.exists():
-                return False
-            data = locked_read_json(ctx_file, {}, "recent_context.lock")
-            if not isinstance(data, dict):
+            from context_tracker import activity_snapshot
+
+            snapshot = activity_snapshot(refresh=True)
+            if not snapshot.get("has_context"):
                 return False
 
             now = time.time()
-            messages = data.get("messages", [])
-
-            # Condition A: use persisted last_message_role (not freshness-filtered messages)
-            last_role = data.get("last_message_role")
+            last_role = snapshot.get("last_message_role")
             if last_role == "user":
                 logger.debug("Activity guard: last message is from user, suppressing")
                 return True
 
-            last_user_ts = data.get("last_user_timestamp")
-
-            # Condition B: check time since last user message
+            last_user_ts = snapshot.get("last_user_timestamp")
             if last_user_ts is not None:
                 seconds_since_user = now - float(last_user_ts)
                 if seconds_since_user < 1800:
                     logger.debug("Activity guard: user spoke %.0fs ago (< 1800s), suppressing", seconds_since_user)
                     return True
-            else:
-                # Fallback: scan messages for the most recent user message
-                for m in reversed(messages):
-                    ts = m.get("timestamp")
-                    if ts is not None and m.get("role") == "user":
-                        if (now - float(ts)) < 1800:
-                            logger.debug("Activity guard: user spoke < 30min ago (legacy scan), suppressing")
-                            return True
-                        break
 
             return False
         except Exception:
