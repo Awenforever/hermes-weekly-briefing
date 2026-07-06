@@ -74,7 +74,7 @@ Hook (gateway:startup) -> ProactivePlatformWatcher (asyncio)
 |---|---|
 | 🧠 Personality Genome | 9-dimensional voice vector with event-driven evolution. |
 | ⏱️ Voice-linked Cooldown | `social_urge` controls send interval: `max(30, 120 - urge × 90)` minutes. |
-| 🛑 Activity Guard | Sends only when conversation fully silent 30+ min (last message by Hermes, no message from either side in 30 min). |
+| 🛑 Activity Guard | Sends only when idle: Hermes not working, last message by Hermes, conversation silent 30+ min. |
 | 🌐 Discovery Mesh | Collects from arXiv, GitHub, HN, V2EX, Bilibili, SSPAI, Zhihu, papers.cool, Jandan, Xiaohongshu. |
 | 🧩 Context Freshness | Cosine decay over 30min-6h: `1.0 -> ~0.7 -> 0`. |
 | 💬 Multi-message Burst | LLM may emit 1-5 messages separated by `---`, sent 2-5 seconds apart. |
@@ -137,10 +137,11 @@ Hermes Alive does not ask, suggest, check in, explain itself, or optimize for he
 ### 4. User Silence Is a Boundary
 
 The watcher skips the whole tick unless:
+- Hermes is NOT currently executing a task (session is idle), AND
 - Hermes sent the last message, AND
-- The entire conversation has been silent for 30+ minutes (no message from either side).
+- The entire conversation has been silent for 30+ minutes.
 
-This prevents Alive from interrupting when Hermes just replied after a long LLM delay.
+This prevents Alive from interrupting long-running tasks or recently-active chats.
 
 ### 5. Memory Changes Behavior
 

@@ -74,7 +74,7 @@ Hook (gateway:startup) -> ProactivePlatformWatcher (asyncio)
 |---|---|
 | 🧠 Personality Genome | 9维性格向量，事件驱动进化。 |
 | ⏱️ Voice-linked Cooldown | `social_urge` 驱动发送间隔：`max(30, 120 - urge × 90)` 分钟。 |
-| 🛑 Activity Guard | 仅当对话完全静默30+分钟时发送（最后发言者为Hermes，且任意一方30分钟内无消息）。 |
+| 🛑 Activity Guard | 仅当 idle 时发送：Hermes 不在执行任务 + 最后发言者为Hermes + 对话静默30+分钟。 |
 | 🌐 Discovery Mesh | 覆盖 arXiv、GitHub、HN、V2EX、Bilibili、少数派、知乎、papers.cool、煎蛋、小红书。 |
 | 🧩 Context Freshness | 30min-6h 余弦衰减：`1.0 -> ~0.7 -> 0`。 |
 | 💬 Multi-message Burst | LLM 可生成 1-5 条消息，使用 `---` 分隔，间隔 2-5 秒发送。 |
@@ -137,10 +137,11 @@ Hermes Alive 不提问、不建议、不寒暄、不解释自己，也不以“�
 ### 4. 用户沉默是边界
 
 watcher 只有在以下条件同时满足时才继续 tick：
+- Hermes 当前未在执行任务（session idle），且
 - 最后发言者是 Hermes，且
-- 整个对话已静默 30+ 分钟（双方均无新消息）。
+- 整个对话已静默 30+ 分钟。
 
-避免 Hermes 因 LLM 延迟刚回复完就被 Alive 打断。
+避免打断长任务执行或刚活跃过的对话。
 
 ### 5. 记忆会改变行为
 
