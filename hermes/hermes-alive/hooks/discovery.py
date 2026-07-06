@@ -22,6 +22,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,10 @@ MAX_COMMITS_PER_REPO = 5
 MAX_ERROR_PATTERNS = 5
 MAX_RECENT_FILES = int(os.getenv("HERMES_DISCOVERY_MAX_RECENT_FILES", "5"))
 
-SOURCES_CONFIG_PATH = os.getenv("HERMES_SOURCES_CONFIG", "/opt/data/hermes_alive_shared/sources.yaml")
+SOURCES_CONFIG_PATH = os.getenv(
+    "HERMES_SOURCES_CONFIG",
+    str(Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared")) / "sources.yaml"),
+)
 BUDGET_MAX_PER_RUN = int(os.getenv("HERMES_DISCOVERY_BUDGET_MAX_PER_RUN", "15"))
 BUDGET_MAX_PER_SOURCE = int(os.getenv("HERMES_DISCOVERY_BUDGET_MAX_PER_SOURCE", "5"))
 SHARE_THRESHOLD_MIN_SCORE = float(os.getenv("HERMES_DISCOVERY_SHARE_THRESHOLD_MIN_SCORE", "0.6"))

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Absolute imports (hook files are loaded flat by importlib)
-from dream_diff_store import DreamDiff, load_latest_diff, save_diff, mark_applied
+from dream_diff_store import DreamDiff, load_latest_diff, save_diff
 from dream_prompt import (
     DEFAULT_DREAM_INTERVAL_HOURS,
     DREAM_ENABLED_ENV,

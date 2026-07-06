@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from safe_io import LOCK_DIR, file_lock, locked_read_json, locked_write_json
+from safe_io import LOCK_DIR, file_lock, locked_read_json
 
 logger = logging.getLogger(__name__)
 

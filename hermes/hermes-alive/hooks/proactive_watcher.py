@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 # Hermes Alive import path bootstrap
-# Hermes Alive import path bootstrap
 _HOOK_DIR = os.getenv("HERMES_HOOK_DIR", "/opt/data/hooks/hermes-alive")
 _SHARED_DIR = os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared")
 for _p in (_HOOK_DIR, _SHARED_DIR):
@@ -26,7 +25,6 @@ from typing import Any
 
 from safe_io import (
     append_jsonl,
-    read_json,
     locked_read_json,
     locked_write_json,
     try_file_lock,
@@ -48,7 +46,7 @@ LLM_ENABLED_ENV = "HERMES_PROACTIVE_LLM_ENABLED"
 LLM_MODEL_ENV = "HERMES_PROACTIVE_LLM_MODEL"
 DISCOVERY_ENABLED_ENV = "HERMES_PROACTIVE_DISCOVERY_ENABLED"
 
-BASE = Path(os.getenv("HERMES_HOME", "/opt/data")) / "hermes_alive_shared"
+BASE = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared"))
 WATCHER_LOCK = BASE / "locks" / "proactive_watcher.lock"
 PROACTIVE_LOG = BASE / "proactive_log.jsonl"
 CONTROL = BASE / "control.json"

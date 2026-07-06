@@ -9,6 +9,8 @@ HOOK_DIR="${HOOK_DIR:-/opt/data/hooks/hermes-alive}"
 SHARED_DIR="${SHARED_DIR:-/opt/data/hermes_alive_shared}"
 HERMES_VENV="${HERMES_VENV:-/opt/hermes/.venv}"
 BROWSER_DIR="${BROWSER_DIR:-/opt/data/.playwright-browsers}"
+export HERMES_HOOK_DIR="$HOOK_DIR"
+export HERMES_ALIVE_SHARED_DIR="$SHARED_DIR"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
