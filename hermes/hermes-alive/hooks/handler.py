@@ -9,7 +9,7 @@ import os
 import sys
 # Hermes Alive import path bootstrap
 _HOOK_DIR = os.getenv("HERMES_HOOK_DIR", "/opt/data/hooks/hermes-alive")
-_SHARED_DIR = os.getenv("HERMES_SHARED_DIR", "/opt/data/hermes_alive_shared")
+_SHARED_DIR = os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared")
 for _p in (_HOOK_DIR, _SHARED_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -83,7 +83,7 @@ async def _on_session_start(context: dict):
         from voice_engine import VoiceEngine
         engine = VoiceEngine()
         engine.on_interaction_start(context if isinstance(context, dict) else {})
-        voice_file = Path(os.getenv("HERMES_HOME", "/opt/data")) / "hermes_alive_shared" / "current_voice.txt"
+        voice_file = Path(_SHARED_DIR) / "current_voice.txt"
         atomic_write_text(voice_file, engine.snapshot_prompt())
         logger.info("Voice touched on session start: stage=%s", engine.genome.relationship_stage)
     except Exception:
@@ -106,7 +106,7 @@ async def _on_agent_end(context: dict):
             signals = captured.get("user_style_signals", {}) if isinstance(captured.get("user_style_signals"), dict) else {}
         engine = VoiceEngine()
         engine.on_agent_end(signals)
-        voice_file = Path(os.getenv("HERMES_HOME", "/opt/data")) / "hermes_alive_shared" / "current_voice.txt"
+        voice_file = Path(_SHARED_DIR) / "current_voice.txt"
         atomic_write_text(voice_file, engine.snapshot_prompt())
         logger.info("Voice evolved on agent end: stage=%s message_count=%s", engine.genome.relationship_stage, engine.message_count)
     except Exception:

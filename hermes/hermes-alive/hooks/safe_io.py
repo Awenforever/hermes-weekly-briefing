@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-BASE = Path("/opt/data/hermes_alive_shared")
+BASE = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared"))
 LOCK_DIR = BASE / "locks"
 LOCK_DIR.mkdir(parents=True, exist_ok=True)
 
