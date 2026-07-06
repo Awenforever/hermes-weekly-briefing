@@ -39,6 +39,9 @@ sync_files() {
     # Remove deprecated files from deploy dir
     rm -f "$HOOK_DIR/mood_engine.py" "$HOOK_DIR/message_composer.py"
     
+    # Ensure 644 permissions for non-root hermes user
+    chmod 644 "$HOOK_DIR"/*.py "$SHARED_DIR/safe_io.py" 2>/dev/null || true
+    
     # Clear pycache to force fresh imports
     rm -rf "$HOOK_DIR/__pycache__"
     

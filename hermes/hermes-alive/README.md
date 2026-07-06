@@ -4,7 +4,7 @@
 
 **Gateway-native proactive AI companion for Hermes Agent.**
 
-![version](https://img.shields.io/badge/version-v0.17.0-blue)
+![version](https://img.shields.io/badge/version-v2.3.0-blue)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![license](https://img.shields.io/badge/license-Hermes%20Project-green)
 

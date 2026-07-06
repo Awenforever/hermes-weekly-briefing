@@ -246,6 +246,10 @@ Activity guard: if the most recent user message is <30min old, the entire tick i
 
 - **Activity guard: two conditions** — Proactive messages are suppressed unless BOTH are true: (A) the chronologically last message in the conversation is from Hermes (role="assistant"), NOT the user — if the user spoke last, Hermes is mid-reply; (B) the last user message was ≥ 30 minutes ago. If `recent_context.json` is missing (see session ID pitfall above), condition B silently passes and the guard fails open.
 
+- **File permissions must be 644 for non-root deployment** — Hook files deployed to `/opt/data/hooks/hermes-alive/` must be world-readable (644). Files with `0600` (owner-only) or `0000` (no access) will cause `PermissionError` when the gateway runs as non-root `hermes` user. The production Docker container runs as root so issues are masked, but clean installs or user changes will break. Check with `find /opt/data/hooks/hermes-alive -name '*.py' ! -perm 644`. Fix with `chmod 644 *.py`. The `deploy.sh` script should enforce 644 during `sync_files()`.
+
+- **Shared path env var consistency** — All runtime state paths must use `HERMES_ALIVE_SHARED_DIR` env var (default: `/opt/data/hermes_alive_shared`). `safe_io.py` was the last holdout with a hardcoded `BASE = Path("/opt/data/hermes_alive_shared")` — must be `Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared"))`. `handler.py` must use `_SHARED_DIR` for all path construction (e.g. `current_voice.txt`), not `Path(os.getenv("HERMES_HOME")) / "hermes_alive_shared"` concatenation. The env var used for import path bootstrap (`_SHARED_DIR = os.getenv("HERMES_ALIVE_SHARED_DIR", ...)`) should also be used for file writes — mixing env vars risks path divergence.
+
 ## Extending
 
 To add a new content platform:
