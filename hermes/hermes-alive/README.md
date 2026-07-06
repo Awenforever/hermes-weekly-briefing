@@ -59,7 +59,7 @@ HERMES_DREAM_ENABLED=true
 Hook (gateway:startup) -> ProactivePlatformWatcher (asyncio)
   tick() every 300s
   ├─ voice.load()           -> Personality Genome (9 dimensions)
-  ├─ activity guard         -> skip if user was active within 30 minutes
+  activity guard         -> skip if conversation not silent 30+ min
   ├─ cooldown.check()       -> dynamic interval driven by social_urge
   ├─ discovery.collect()    -> 10 content sources, every 4h
   ├─ dream.run_cycle()      -> memory consolidation, every 24h
@@ -74,7 +74,7 @@ Hook (gateway:startup) -> ProactivePlatformWatcher (asyncio)
 |---|---|
 | 🧠 Personality Genome | 9-dimensional voice vector with event-driven evolution. |
 | ⏱️ Voice-linked Cooldown | `social_urge` controls send interval: `max(30, 120 - urge × 90)` minutes. |
-| 🛑 Activity Guard | Sends only when Hermes was last speaker and user has been silent for 30+ minutes. |
+| 🛑 Activity Guard | Sends only when conversation fully silent 30+ min (last message by Hermes, no message from either side in 30 min). |
 | 🌐 Discovery Mesh | Collects from arXiv, GitHub, HN, V2EX, Bilibili, SSPAI, Zhihu, papers.cool, Jandan, Xiaohongshu. |
 | 🧩 Context Freshness | Cosine decay over 30min-6h: `1.0 -> ~0.7 -> 0`. |
 | 💬 Multi-message Burst | LLM may emit 1-5 messages separated by `---`, sent 2-5 seconds apart. |
@@ -136,12 +136,11 @@ Hermes Alive does not ask, suggest, check in, explain itself, or optimize for he
 
 ### 4. User Silence Is a Boundary
 
-The watcher skips the whole tick unless both conditions pass:
+The watcher skips the whole tick unless:
+- Hermes sent the last message, AND
+- The entire conversation has been silent for 30+ minutes (no message from either side).
 
-| Condition | Rule |
-|---|---|
-| Last speaker | The latest message must be from Hermes. |
-| User silence | The latest user message must be at least 30 minutes old. |
+This prevents Alive from interrupting when Hermes just replied after a long LLM delay.
 
 ### 5. Memory Changes Behavior
 

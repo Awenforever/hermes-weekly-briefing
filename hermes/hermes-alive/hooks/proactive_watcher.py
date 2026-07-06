@@ -417,10 +417,12 @@ class ProactivePlatformWatcher:
 
         Returns True (suppress) if ANY of:
         - The last message is from the user (user is waiting for a reply)
-        - The last user message was < 30 minutes ago
+        - The last message (from either side) was < 30 minutes ago
 
         Only allows proactive messages when the conversation is truly idle:
-        Hermes sent the last message AND the user hasn't spoken in 30+ minutes.
+        Hermes sent the last message AND the entire conversation has been
+        silent for 30+ minutes.  This prevents Alive from interrupting when
+        Hermes just replied after a long delay (e.g. slow LLM).
         """
         try:
             from context_tracker import activity_snapshot
@@ -435,11 +437,11 @@ class ProactivePlatformWatcher:
                 logger.debug("Activity guard: last message is from user, suppressing")
                 return True
 
-            last_user_ts = snapshot.get("last_user_timestamp")
-            if last_user_ts is not None:
-                seconds_since_user = now - float(last_user_ts)
-                if seconds_since_user < 1800:
-                    logger.debug("Activity guard: user spoke %.0fs ago (< 1800s), suppressing", seconds_since_user)
+            last_msg_ts = snapshot.get("last_message_timestamp")
+            if last_msg_ts is not None:
+                seconds_since_last = now - float(last_msg_ts)
+                if seconds_since_last < 1800:
+                    logger.debug("Activity guard: last message %.0fs ago (< 1800s), suppressing", seconds_since_last)
                     return True
 
             return False
