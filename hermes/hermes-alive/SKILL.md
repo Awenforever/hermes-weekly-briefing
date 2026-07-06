@@ -35,7 +35,8 @@ Hermes Alive adds a persistent asyncio task to your Hermes gateway that:
 - **Query tool** — `scripts/logs.py` for filtering, stats, and preview
 - **Context injection** — recent conversation injected into compose prompt with cosine freshness decay (30min–6h)
 - **Multi-message burst** — LLM can compose 1-5 messages with `---` separator, sent 2-5s apart like a real person
-- **Activity guard** — two conditions must BOTH be met for proactive messages to fire: (a) the last message in the conversation is from Hermes (not the user — meaning Hermes is not mid-reply), and (b) the last user message was ≥ 30 minutes ago. If either condition fails, the tick is skipped without advancing cooldown.
+- **Activity guard** — three-layer defense: (1) if Hermes is actively executing a task (session busy via `session:start`/`agent:end` hook state machine), suppress entirely; (2) if the last message in conversation is from user (Hermes mid-reply), suppress; (3) if any message (either side) was sent < 30 minutes ago (conversation not fully silent), suppress. Only when all three pass does a proactive message fire. This prevents Alive from interrupting long-running tasks (e.g. Codex delegations) or recently-active chats.
+- **ContextQueue** — in-memory message queue (max 30) persisted to `context_queue.json`. Replaces fragile `agent:end`-dependent `recent_context.json` capture. Refreshed from `state.db` before every tick so the guard never misses user activity, even if the hook event didn't fire.
 - **Voice Genome** — per-user Personality Genome stored in `voice_state.json`, evolved from user style signals and dream findings
 - **Voice-linked cooldown** — dynamic spacing from independent `social_urge`: `max(30, 120 - social_urge × 90)` min
 - **Dream reads sessions** — real state.db transcripts, not just static MEMORY.md
@@ -52,14 +53,16 @@ Hook (gateway:startup) → ProactivePlatformWatcher (asyncio task)
   │
   tick() every 300s
   │
-  ├─ voice.load()           → per-user Personality Genome + social_urge
-  ├─ activity guard         → skip if user talked <30min ago
-  ├─ cooldown.check()       → social_urge-linked dynamic spacing
-  ├─ discovery.collect()    → 10 content sources (per 4h)
-  ├─ dream.run_cycle()      → memory consolidation (per 24h)
-  └─ LLM.compose()          → System Prompt + voice snapshot + discovery + recent context
+  ├─ voice.load()              → per-user Personality Genome + social_urge
+  ├─ is_session_busy()         → skip if Hermes still executing a task
+  ├─ ContextQueue.refresh()    → sync from state.db (source+user_id JOIN)
+  ├─ activity guard            → three-layer: busy → user last → silence check
+  ├─ cooldown.check()          → social_urge-linked dynamic spacing
+  ├─ discovery.collect()       → 10 content sources (per 4h)
+  ├─ dream.run_cycle()         → memory consolidation (per 24h)
+  └─ LLM.compose()             → System Prompt + voice snapshot + discovery + context
        │
-       └─ adapter.send()    → WeChat message(s)
+       └─ adapter.send()       → WeChat message(s)
 ```
 
 ### Content Sources
@@ -152,7 +155,7 @@ Key variables:
 
 **Removed in v2.2**: `HERMES_PROACTIVE_ACTIVE_COOLDOWN_MINUTES` — replaced by activity guard (hard skip <30min) + voice-linked cooldown.
 
-**Changed in v2.3**: `MOOD_ENABLED`/`COMPOSER_ENABLED`, `mood_engine.py`, and `message_composer.py` were removed. Use `VOICE_ENABLED=true`; old `mood_state.json` is migrated into `voice_state.json` on first load.
+**Changed in v2.3**: `MOOD_ENABLED`/`COMPOSER_ENABLED`, `mood_engine.py`, `message_composer.py`, and `recent_context.json` were removed. Replaced by ContextQueue (`context_queue.json`) for activity guard and freshness injection. Session busy/idle state machine added via `session:start`/`agent:end` hooks — prevents proactive messages while Hermes is executing tasks. Activity guard upgraded from two-condition to three-layer (busy → user → silence). Deploy script now auto-detects timezone and appends all env vars. README includes AI agent installation guide.
 
 ## Logging
 
@@ -197,11 +200,11 @@ import json,sys
 
 ## Context Injection (Freshness Decay)
 
-Recent conversation context is captured on `agent:end` and injected into the compose prompt with cosine-based freshness:
+Recent conversation context is captured in the ContextQueue and injected into the compose prompt with cosine-based freshness:
 
 | Time Since | Label | Weight | Effect |
 |------------|-------|--------|--------|
-| < 30 min | — | — | Tick skipped entirely (activity guard) |
+| < 30 min | — | — | Tick suppressed (activity guard) |
 | 30 min | 刚刚 | 1.0 | Alive likely to continue the thread |
 | 30 min–3h | 大约一小时前 | ~0.7 | May reference if relevant |
 | 3h–6h | 之前 | ~0.0 | Ignored entirely |
@@ -209,7 +212,14 @@ Recent conversation context is captured on `agent:end` and injected into the com
 
 Weight formula: `cos(π/2 × (t − 30min) / 330min)` for t ∈ [30min, 6h].
 
-Activity guard: if the most recent user message is <30min old, the entire tick is skipped — no message sent, no cooldown triggered. This prevents Alive from interrupting active coding/debugging sessions.
+**Activity guard final logic (v2.3):**
+1. `is_session_busy()` → suppress (Hermes working on a task)
+2. No context in queue → allow (new conversation)
+3. `last_message_role == "user"` → suppress (user waiting for reply)
+4. `now - last_message_timestamp < 1800s` → suppress (conversation not fully silent)
+5. Otherwise → allow
+
+Key insight: "user silence" is not about the user's last message age — it's about whether the entire conversation has been idle for 30+ minutes, with Hermes as the last speaker and no active task running. The `last_message_timestamp` (from either side) is what matters, not `last_user_timestamp`.
 
 ## Design Principles
 
@@ -222,7 +232,7 @@ Activity guard: if the most recent user message is <30min old, the entire tick i
 ## Pitfalls
 
 - **Absolute imports only** — hook files loaded flat by `importlib`, no relative imports
-- **Timezone** — set `TZ=Asia/Shanghai` or time context will be wrong
+- **Timezone** — set `TZ` to the system timezone or time context will be wrong. `deploy.sh` auto-detects via `timedatectl` / `/etc/timezone` / `/etc/localtime` symlink and appends to `/opt/data/.env` during `setup_env()`. Do NOT hardcode `Asia/Shanghai` — the deploy script handles detection. For weather-aware messages, optionally set `HERMES_PROACTIVE_LAT` and `HERMES_PROACTIVE_LON`.
 - **Gateway restart required** — hook changes only picked up at `gateway:startup`
 - **Playwright persistence** — Chromium must be on persistent volume (`/opt/data/.playwright-browsers`), Python package reinstalled after image rebuild
 - **Bilibili anti-bot** — needs full browser UA, not the discovery UA
@@ -236,7 +246,7 @@ Activity guard: if the most recent user message is <30min old, the entire tick i
 - **Never test deploy on production hooks directory** — Use env vars `HOOK_DIR` and `SHARED_DIR` to isolate tests: `HOOK_DIR=/tmp/test-hooks SHARED_DIR=/tmp/test-shared bash deploy.sh`. The deploy script respects these overrides. Accidentally `rm -rf /opt/data/hooks/hermes-alive/*` will delete the running hook's source files — the modules stay in Python's memory cache but voice_state.json and other runtime state will be lost. After restoration, verify with `ls /opt/data/hooks/hermes-alive/`.
 - **Migration guard against degraded state** — `mood_state.json` values decay toward 0 over time (mechanical tick decay). When migrating to voice_state.json, values below 0.08 are treated as meaningless and skipped — the voice genome uses freshly generated defaults instead. After successful migration, the old mood file is renamed to `.migrated` to prevent re-migration on subsequent restarts. If you see voice dimensions near 0 after first startup, check that the migration guard triggered correctly.
 
-- **Session ID format change breaks context capture** — `context_tracker.py` historically matched sessions with `WHERE id LIKE 'agent:main:weixin:dm:%'`. Hermes Agent may change session ID formats (e.g. to `20260706_083535_397de254`). When this happens, `capture_recent_context()` silently returns `{}` — `recent_context.json` is never created, the activity guard never sees user activity, and proactive messages fire immediately regardless of the 30-minute rule. **Fix**: match by `WHERE source = 'weixin' AND user_id = ?` instead of ID prefix. Symptom: `ls /opt/data/hermes_alive_shared/recent_context.json` returns "No such file" after gateway restart. Verify with `python3 -c "from context_tracker import capture_recent_context; print(capture_recent_context())"` — should return a dict with `session_id` and `last_user_timestamp`.
+- **ContextQueue reliability** — `context_tracker.py` refreshes from `state.db` using `WHERE source = 'weixin' AND user_id = ?` JOIN on every `activity_snapshot(refresh=True)` call. The watcher calls this before each tick's guard decision, so even if `agent:end` hook fails to fire, the queue stays current. `context_queue.json` persists to disk for crash recovery. Stale `recent_context.json` was removed in v2.3 — it is no longer written or read.
 
 - **Lock name must match between read and write** — `_sent_count_between()` reads `proactive_log.jsonl` and must use the SAME lock name as `append_jsonl()`. The write side uses `"proactive_log.lock"` — the read side must use exactly that name, not a different name like `"proactive_log.read.lock"`. Mismatched lock names = no synchronization.
 
@@ -244,7 +254,7 @@ Activity guard: if the most recent user message is <30min old, the entire tick i
 
 - **Footer shows real model name** — Proactive messages must set `is_system: false` in metadata so the WeChat adapter uses `model_name` for the footer tag instead of "hermes". The old `SYSTEM_METADATA` default had `is_system: true`. Fixed in `proactive_watcher._metadata()`.
 
-- **Activity guard: two conditions** — Proactive messages are suppressed unless BOTH are true: (A) the chronologically last message in the conversation is from Hermes (role="assistant"), NOT the user — if the user spoke last, Hermes is mid-reply; (B) the last user message was ≥ 30 minutes ago. If `recent_context.json` is missing (see session ID pitfall above), condition B silently passes and the guard fails open.
+- **Activity guard correct semantics** — The guard checks `last_message_timestamp` (most recent message from EITHER side), NOT `last_user_timestamp`. Checking user's last message age is wrong: if Hermes replied after a 40-min LLM delay, the user message is 40-min old but Hermes just spoke — the conversation is NOT idle. The correct check is "has the entire conversation been silent for 30+ min?" This prevents Alive from firing immediately after a delayed Hermes reply. Additionally, `is_session_busy()` (driven by `session:start`/`agent:end` hook events) blocks all proactive messages while Hermes is executing a task. If the watcher detects Hermes is mid-task, it suppresses unconditionally even if the conversation appears silent.
 
 - **File permissions must be 644 for non-root deployment** — Hook files deployed to `/opt/data/hooks/hermes-alive/` must be world-readable (644). Files with `0600` (owner-only) or `0000` (no access) will cause `PermissionError` when the gateway runs as non-root `hermes` user. The production Docker container runs as root so issues are masked, but clean installs or user changes will break. Check with `find /opt/data/hooks/hermes-alive -name '*.py' ! -perm 644`. Fix with `chmod 644 *.py`. The `deploy.sh` script should enforce 644 during `sync_files()`.
 

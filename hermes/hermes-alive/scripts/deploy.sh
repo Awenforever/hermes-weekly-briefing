@@ -5,8 +5,9 @@
 
 set -e
 
-HOOK_DIR="${HOOK_DIR:-/opt/data/hooks/hermes-alive}"
-SHARED_DIR="${SHARED_DIR:-/opt/data/hermes_alive_shared}"
+HERMES_HOME="${HERMES_HOME:-/opt/data}"
+HOOK_DIR="${HOOK_DIR:-$HERMES_HOME/hooks/hermes-alive}"
+SHARED_DIR="${SHARED_DIR:-${HERMES_ALIVE_SHARED_DIR:-$HERMES_HOME/hermes_alive_shared}}"
 HERMES_VENV="${HERMES_VENV:-/opt/hermes/.venv}"
 BROWSER_DIR="${BROWSER_DIR:-/opt/data/.playwright-browsers}"
 export HERMES_HOOK_DIR="$HOOK_DIR"
