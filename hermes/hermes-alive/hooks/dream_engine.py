@@ -33,8 +33,9 @@ from dream_prompt import (
 
 logger = logging.getLogger(__name__)
 
-# The main Weixin session prefix to filter by (same as context_tracker.py)
-WEIXIN_SESSION_PREFIX = "agent:main:weixin:dm:"
+# The Weixin user to track (matched by source + user_id in sessions table)
+WEIXIN_SOURCE = "weixin"
+WEIXIN_USER_ID = os.getenv("HERMES_PROACTIVE_WEIXIN_CHAT_ID", "").strip()
 HERMES_HOME = os.getenv("HERMES_HOME", "/opt/data")
 STATE_DB_PATH = os.getenv("HERMES_STATE_DB", os.path.join(HERMES_HOME, "state.db"))
 
@@ -183,11 +184,15 @@ class DreamEngine:
         try:
             cursor = conn.cursor()
 
+            if not WEIXIN_USER_ID:
+                logger.debug("No WEIXIN_CHAT_ID configured; cannot read session transcripts")
+                return []
+
             # Find recent Weixin DM session IDs (last 5)
             cursor.execute(
                 "SELECT id, started_at FROM sessions "
-                "WHERE id LIKE ? ORDER BY started_at DESC LIMIT 5",
-                (f"{WEIXIN_SESSION_PREFIX}%",)
+                "WHERE source = ? AND user_id = ? ORDER BY started_at DESC LIMIT 5",
+                (WEIXIN_SOURCE, WEIXIN_USER_ID)
             )
             sessions = cursor.fetchall()
             if not sessions:

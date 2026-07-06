@@ -35,7 +35,7 @@ Hermes Alive adds a persistent asyncio task to your Hermes gateway that:
 - **Query tool** — `scripts/logs.py` for filtering, stats, and preview
 - **Context injection** — recent conversation injected into compose prompt with cosine freshness decay (30min–6h)
 - **Multi-message burst** — LLM can compose 1-5 messages with `---` separator, sent 2-5s apart like a real person
-- **Activity guard** — if user interacted <30min ago → skip entirely (no cooldown triggered, no message sent)
+- **Activity guard** — two conditions must BOTH be met for proactive messages to fire: (a) the last message in the conversation is from Hermes (not the user — meaning Hermes is not mid-reply), and (b) the last user message was ≥ 30 minutes ago. If either condition fails, the tick is skipped without advancing cooldown.
 - **Voice Genome** — per-user Personality Genome stored in `voice_state.json`, evolved from user style signals and dream findings
 - **Voice-linked cooldown** — dynamic spacing from independent `social_urge`: `max(30, 120 - social_urge × 90)` min
 - **Dream reads sessions** — real state.db transcripts, not just static MEMORY.md
@@ -121,7 +121,8 @@ hermes-alive/
 └── references/
     ├── codex-patterns.md
     ├── message-style-guidelines.md   ← Discovery ref style + multi-message + context freshness
-    └── platform-discovery-patterns.md
+    ├── platform-discovery-patterns.md
+    └── session-id-format-change.md   ← Debugging guide for activity guard failure after Hermes update
 ```
 
 ## Configuration
@@ -230,8 +231,20 @@ Activity guard: if the most recent user message is <30min old, the entire tick i
 - **LLM fallback** — primary model failure silently retries with `HERMES_PROACTIVE_LLM_FALLBACK_MODEL` (must be set in .env). Works via `async_call_llm(task="proactive", model=fallback_model, ...)`.
 - **Discovery cache** — persisted to `discovery_cache.json`. Survives restarts. Fresh data every 4h from both external + Playwright sources.
 - **`.env` is protected** — cannot modify from agent context. User must manually update `/opt/data/.env` for parameter changes.
-- **Stale __pycache__ after file deletion** — after deleting modules (mood_engine.py, message_composer.py), clear `__pycache__/` before restart. Stale `.pyc` files won't cause import failures (Python checks .py timestamps) but can confuse debugging.
+- **Footer shows "hermes" instead of model name** — Proactive messages must set `is_system: false` in metadata. When `is_system: true` (the old default from SYSTEM_METADATA), the WeChat adapter tags messages as system-origin and shows "hermes" as the footer regardless of `model_name`. The fix is in `proactive_watcher._metadata()` — it now sets `is_system = False` so the footer reflects the actual model (e.g. `deepseek-v4-flash-ascend`).
+
+- **Never test deploy on production hooks directory** — Use env vars `HOOK_DIR` and `SHARED_DIR` to isolate tests: `HOOK_DIR=/tmp/test-hooks SHARED_DIR=/tmp/test-shared bash deploy.sh`. The deploy script respects these overrides. Accidentally `rm -rf /opt/data/hooks/hermes-alive/*` will delete the running hook's source files — the modules stay in Python's memory cache but voice_state.json and other runtime state will be lost. After restoration, verify with `ls /opt/data/hooks/hermes-alive/`.
 - **Migration guard against degraded state** — `mood_state.json` values decay toward 0 over time (mechanical tick decay). When migrating to voice_state.json, values below 0.08 are treated as meaningless and skipped — the voice genome uses freshly generated defaults instead. After successful migration, the old mood file is renamed to `.migrated` to prevent re-migration on subsequent restarts. If you see voice dimensions near 0 after first startup, check that the migration guard triggered correctly.
+
+- **Session ID format change breaks context capture** — `context_tracker.py` historically matched sessions with `WHERE id LIKE 'agent:main:weixin:dm:%'`. Hermes Agent may change session ID formats (e.g. to `20260706_083535_397de254`). When this happens, `capture_recent_context()` silently returns `{}` — `recent_context.json` is never created, the activity guard never sees user activity, and proactive messages fire immediately regardless of the 30-minute rule. **Fix**: match by `WHERE source = 'weixin' AND user_id = ?` instead of ID prefix. Symptom: `ls /opt/data/hermes_alive_shared/recent_context.json` returns "No such file" after gateway restart. Verify with `python3 -c "from context_tracker import capture_recent_context; print(capture_recent_context())"` — should return a dict with `session_id` and `last_user_timestamp`.
+
+- **Lock name must match between read and write** — `_sent_count_between()` reads `proactive_log.jsonl` and must use the SAME lock name as `append_jsonl()`. The write side uses `"proactive_log.lock"` — the read side must use exactly that name, not a different name like `"proactive_log.read.lock"`. Mismatched lock names = no synchronization.
+
+- **Voice genome floor for low-baseline dimensions** — `humor_absurd` and `self_disclosure` have low defaults (0.2) and can dip below 0.2 during initialization due to the random component. After `_clamp()`, explicitly set floor: `if dim in ("humor_absurd", "self_disclosure") and value < 0.2: value = 0.2`. Verify with 500-init stress test.
+
+- **Footer shows real model name** — Proactive messages must set `is_system: false` in metadata so the WeChat adapter uses `model_name` for the footer tag instead of "hermes". The old `SYSTEM_METADATA` default had `is_system: true`. Fixed in `proactive_watcher._metadata()`.
+
+- **Activity guard: two conditions** — Proactive messages are suppressed unless BOTH are true: (A) the chronologically last message in the conversation is from Hermes (role="assistant"), NOT the user — if the user spoke last, Hermes is mid-reply; (B) the last user message was ≥ 30 minutes ago. If `recent_context.json` is missing (see session ID pitfall above), condition B silently passes and the guard fails open.
 
 ## Extending
 

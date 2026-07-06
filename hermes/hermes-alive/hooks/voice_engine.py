@@ -6,6 +6,7 @@ single short-term send-cadence dimension.
 """
 
 from __future__ import annotations
+import os
 
 import hashlib
 import random
@@ -30,9 +31,9 @@ STYLE_DIMENSIONS = (
 )
 
 RELATIONSHIP_STAGES = ("new", "exploring", "familiar", "close")
-SHARED_STATE_PATH = Path("/opt/data/hermes_alive_shared/voice_state.json")
-OLD_MOOD_STATE_PATH = Path("/opt/data/hermes_alive_shared/mood_state.json")
-PROACTIVE_LOG = Path("/opt/data/hermes_alive_shared/proactive_log.jsonl")
+SHARED_STATE_PATH = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared")) / "voice_state.json"
+OLD_MOOD_STATE_PATH = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared")) / "mood_state.json"
+PROACTIVE_LOG = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared")) / "proactive_log.jsonl"
 VOICE_LOCK_NAME = "voice_state.lock"
 MAX_EVOLUTION_LOG = 80
 

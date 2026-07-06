@@ -30,8 +30,9 @@ SHARED_DIR = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_s
 CONTEXT_FILE = SHARED_DIR / "recent_context.json"
 PROACTIVE_LOG = SHARED_DIR / "proactive_log.jsonl"
 
-# The main Weixin session prefix to filter by
-WEIXIN_SESSION_PREFIX = "agent:main:weixin:dm:"
+# The Weixin user to track (matched by source + user_id in sessions table)
+WEIXIN_SOURCE = "weixin"
+WEIXIN_USER_ID = os.getenv("HERMES_PROACTIVE_WEIXIN_CHAT_ID", "").strip()
 
 # Path to the session state database
 HERMES_HOME = os.getenv("HERMES_HOME", "/opt/data")
@@ -81,25 +82,31 @@ def capture_recent_context() -> dict[str, Any]:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Find the session_key for the main Weixin DM session
+        # Find the latest Weixin DM session by source + user_id
+        if not WEIXIN_USER_ID:
+            logger.debug("No WEIXIN_CHAT_ID configured; cannot capture context")
+            conn.close()
+            return {}
+        # Verify at least one session exists for this user
         cursor.execute(
-            "SELECT id FROM sessions WHERE id LIKE ? ORDER BY started_at DESC LIMIT 1",
-            (f"{WEIXIN_SESSION_PREFIX}%",)
+            "SELECT COUNT(*) FROM sessions WHERE source = ? AND user_id = ?",
+            (WEIXIN_SOURCE, WEIXIN_USER_ID)
         )
-        row = cursor.fetchone()
-        if row is None:
-            logger.debug("No Weixin session found for context capture")
+        if cursor.fetchone()[0] == 0:
+            logger.debug("No Weixin sessions found for context capture")
             conn.close()
             return {}
 
-        session_id = row["id"]
+        session_id = "weixin:" + (WEIXIN_USER_ID[:12] if WEIXIN_USER_ID else "unknown")
 
-        # Get the last N messages from this session
+        # Get the last N messages across ALL Weixin sessions for this user.
+        # A WeChat DM is one continuous conversation regardless of /new.
         cursor.execute(
-            "SELECT role, content, timestamp FROM messages "
-            "WHERE session_id = ? AND active = 1 "
-            "ORDER BY id DESC LIMIT ?",
-            (session_id, MAX_MESSAGES)
+            "SELECT m.role, m.content, m.timestamp FROM messages m "
+            "JOIN sessions s ON m.session_id = s.id "
+            "WHERE s.source = ? AND s.user_id = ? AND m.active = 1 "
+            "ORDER BY m.timestamp DESC LIMIT ?",
+            (WEIXIN_SOURCE, WEIXIN_USER_ID, MAX_MESSAGES)
         )
         rows = cursor.fetchall()
         conn.close()
@@ -152,6 +159,11 @@ def capture_recent_context() -> dict[str, Any]:
         }
         if last_user_ts is not None:
             data["last_user_timestamp"] = last_user_ts
+            # Persist last message role for activity guard (avoids relying on
+            # freshness-filtered messages list which may be empty <30min).
+            data["last_message_role"] = (
+                signal_messages[-1]["role"] if signal_messages else None
+            )
             if prev_user_ts is not None:
                 data["previous_user_timestamp"] = prev_user_ts
         try:

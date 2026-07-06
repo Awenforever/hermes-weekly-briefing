@@ -413,10 +413,14 @@ class ProactivePlatformWatcher:
             return False
 
     def _user_active_recently(self) -> bool:
-        """Check if user has sent any message in the last 30 minutes.
+        """Check if proactive message should be suppressed due to recent activity.
 
-        Reads recent_context.json from the shared dir; if the last user message
-        is < 30 minutes old, return True.
+        Returns True (suppress) if ANY of:
+        - The last message is from the user (user is waiting for a reply)
+        - The last user message was < 30 minutes ago
+
+        Only allows proactive messages when the conversation is truly idle:
+        Hermes sent the last message AND the user hasn't spoken in 30+ minutes.
         """
         try:
             shared = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared"))
@@ -426,22 +430,38 @@ class ProactivePlatformWatcher:
             data = locked_read_json(ctx_file, {}, "recent_context.lock")
             if not isinstance(data, dict):
                 return False
-            last_ts = data.get("last_user_timestamp")
-            if last_ts is None:
-                # Legacy file — scan messages for the most recent user message
-                messages = data.get("messages", [])
-                if not messages:
-                    return False
-                now = time.time()
+
+            now = time.time()
+            messages = data.get("messages", [])
+
+            # Condition A: use persisted last_message_role (not freshness-filtered messages)
+            last_role = data.get("last_message_role")
+            if last_role == "user":
+                logger.debug("Activity guard: last message is from user, suppressing")
+                return True
+
+            last_user_ts = data.get("last_user_timestamp")
+
+            # Condition B: check time since last user message
+            if last_user_ts is not None:
+                seconds_since_user = now - float(last_user_ts)
+                if seconds_since_user < 1800:
+                    logger.debug("Activity guard: user spoke %.0fs ago (< 1800s), suppressing", seconds_since_user)
+                    return True
+            else:
+                # Fallback: scan messages for the most recent user message
                 for m in reversed(messages):
                     ts = m.get("timestamp")
                     if ts is not None and m.get("role") == "user":
-                        return (now - float(ts)) < 1800
-                return False
-            return (time.time() - float(last_ts)) < 1800
+                        if (now - float(ts)) < 1800:
+                            logger.debug("Activity guard: user spoke < 30min ago (legacy scan), suppressing")
+                            return True
+                        break
+
+            return False
         except Exception:
             logger.exception("_user_active_recently failed")
-            return False
+            return True  # fail-safe: suppress on error
 
     def _extract_social_urge(self, voice: Any) -> float | None:
         """Extract social_urge value from the voice engine, return None if unavailable."""
@@ -508,7 +528,7 @@ class ProactivePlatformWatcher:
             "routed_model": generated_by,
             "model": generated_by,
         })
-        metadata["is_system"] = True
+        metadata["is_system"] = False  # proactive messages are from the model, not the system
         return metadata
 
     def _log(self, decision: str, **extra: Any) -> None:
