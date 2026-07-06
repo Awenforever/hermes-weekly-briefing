@@ -28,7 +28,6 @@ PROMPT_SNIPPET_CHARS = 200
 
 SHARED_DIR = Path(os.getenv("HERMES_ALIVE_SHARED_DIR", "/opt/data/hermes_alive_shared"))
 QUEUE_FILE = SHARED_DIR / "context_queue.json"
-CONTEXT_FILE = SHARED_DIR / "recent_context.json"
 PROACTIVE_LOG = SHARED_DIR / "proactive_log.jsonl"
 
 WEIXIN_SOURCE = "weixin"
@@ -175,18 +174,17 @@ _QUEUE = ContextQueue()
 
 
 def capture_recent_context() -> dict[str, Any]:
-    """Refresh ContextQueue from state.db.
+    """Refresh ContextQueue from state.db and return user_style_signals.
 
-    Kept under the legacy function name because handler.py calls it on
-    agent:end.  A legacy recent_context.json snapshot is also written for
-    older readers, but guard/composer should use context_queue.json.
+    Called by handler.py on agent:end.  The function name is kept for
+    backward compatibility — it now delegates to ContextQueue.
     """
     try:
         data = _QUEUE.refresh_from_state_db()
-        legacy = _legacy_context_snapshot(data)
-        locked_write_json(CONTEXT_FILE, legacy, "recent_context.lock")
-        logger.info("Context queue refreshed: %d messages", len(data.get("messages", [])))
-        return legacy
+        messages = data.get("messages", [])
+        signals = _extract_user_style_signals(messages)
+        logger.info("Context queue refreshed: %d messages", len(messages) if isinstance(messages, list) else 0)
+        return {"user_style_signals": signals}
     except Exception:
         logger.exception("Failed to refresh context queue")
         return {}
@@ -354,56 +352,6 @@ def _dedupe_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         deduped.append(message)
     return deduped
-
-
-def _legacy_context_snapshot(queue_data: dict[str, Any]) -> dict[str, Any]:
-    messages = queue_data.get("messages", [])
-    if not isinstance(messages, list):
-        messages = []
-    now = time.time()
-    prompt_messages: list[dict[str, Any]] = []
-    last_user_ts: float | None = None
-    prev_user_ts: float | None = None
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        if message.get("role") == "user":
-            prev_user_ts = last_user_ts
-            try:
-                last_user_ts = float(message["timestamp"])
-            except (TypeError, ValueError, KeyError):
-                pass
-        try:
-            seconds_ago = now - float(message["timestamp"])
-        except (TypeError, ValueError, KeyError):
-            continue
-        weight = freshness_decay(seconds_ago)
-        if weight == 0.0:
-            continue
-        prompt_messages.append({
-            "role": message.get("role"),
-            "content": str(message.get("content_snippet") or "")[:500],
-            "timestamp": message.get("timestamp"),
-            "seconds_ago": round(seconds_ago, 1),
-            "weight": weight,
-            "label": freshness_label(seconds_ago),
-        })
-
-    data: dict[str, Any] = {
-        "captured_at": datetime.now(CST).isoformat(),
-        "session_id": "weixin:" + (WEIXIN_USER_ID[:12] if WEIXIN_USER_ID else "unknown"),
-        "message_count": len(prompt_messages),
-        "messages": prompt_messages,
-        "context_queue_file": str(QUEUE_FILE),
-        "user_style_signals": _extract_user_style_signals(messages),
-    }
-    if messages:
-        data["last_message_role"] = messages[-1].get("role")
-    if last_user_ts is not None:
-        data["last_user_timestamp"] = last_user_ts
-    if prev_user_ts is not None:
-        data["previous_user_timestamp"] = prev_user_ts
-    return data
 
 
 def _extract_user_style_signals(messages: list[Any]) -> dict[str, Any]:
