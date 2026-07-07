@@ -18,35 +18,6 @@ index 91c0115..09aa426 100644
 +    return False
 +
 +
-+def _footer_config_model_name() -> str:
-+    try:
-+        footer_config_path = Path(os.environ.get("HERMES_HOME") or "/opt/data") / "config.yaml"
-+        if not footer_config_path.exists():
-+            return ""
-+        try:
-+            import yaml  # type: ignore[import-untyped]
-+
-+            footer_config = yaml.safe_load(footer_config_path.read_text(encoding="utf-8")) or {}
-+            footer_model_config = footer_config.get("model") if isinstance(footer_config, dict) else None
-+            if isinstance(footer_model_config, dict):
-+                return str(footer_model_config.get("default") or "").strip()
-+        except ImportError:
-+            in_model_block = False
-+            for raw_line in footer_config_path.read_text(encoding="utf-8").splitlines():
-+                line = raw_line.split("#", 1)[0].rstrip()
-+                stripped = line.strip()
-+                if not stripped:
-+                    continue
-+                if line == stripped:
-+                    in_model_block = stripped == "model:"
-+                    continue
-+                if in_model_block and stripped.startswith("default:"):
-+                    return stripped.split(":", 1)[1].strip().strip("'\"")
-+    except Exception as exc:
-+        logger.debug("weixin: failed to read footer model from config: %s", exc)
-+    return ""
-+
-+
 +def _footer_model_name(metadata: Optional[Dict[str, Any]]) -> str:
 +    footer_metadata = metadata if isinstance(metadata, dict) else {}
 +    if _is_system_meta(footer_metadata):
@@ -57,7 +28,6 @@ index 91c0115..09aa426 100644
 +        or footer_metadata.get("resolved_model")
 +        or footer_metadata.get("routed_model")
 +        or footer_metadata.get("model")
-+        or _footer_config_model_name()
 +        or "hermes"
 +    ).strip() or "hermes"
 +
