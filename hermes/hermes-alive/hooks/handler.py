@@ -77,6 +77,23 @@ async def _startup(context: dict):
     _watcher_task.add_done_callback(_done)
     logger.warning("Hermes Alive: watcher task created")
 
+    # Send ready notification to home channel
+    try:
+        weixin_chat_id = os.getenv("HERMES_PROACTIVE_WEIXIN_CHAT_ID", "").strip()
+        if weixin_chat_id:
+            for _key, _adapter in runner.adapters.items():
+                key_value = getattr(_key, "value", _key)
+                if key_value == "weixin":
+                    await _adapter.send(
+                        weixin_chat_id,
+                        "Hermes 已就绪。",
+                        metadata={"is_system": True, "model_name": "hermes", "model": "hermes", "resolved_model": "hermes", "routed_model": "hermes"},
+                    )
+                    logger.warning("Hermes Alive: startup ready notification sent to %s", weixin_chat_id)
+                    break
+    except Exception:
+        logger.exception("Hermes Alive: failed to send startup ready notification")
+
 async def _on_session_start(context: dict):
     try:
         from context_tracker import set_session_busy
