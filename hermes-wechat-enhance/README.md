@@ -1,71 +1,66 @@
 # Hermes WeChat Enhance
 
-## 中文
+Hermes 微信增强 skill，提供 WeChat adapter 的增强功能：消息 footer（token 计数 + 模型名）、`/continue` 命令拦截、回复消息预算管理。
 
-这是 Hermes 微信增强 skill，所有文件都位于 `/opt/data/skills/hermes-wechat-enhance/`，不会直接修改 `/opt/hermes/` 或 `/opt/data/hooks/`。
+所有文件位于 `/opt/data/skills/hermes-wechat-enhance/`，不会直接修改 `/opt/hermes/` 或 `/opt/data/hooks/`。
 
-功能：
+## 安装
 
-- 通过 `agent:start` 和 `agent:end` hook 旁路记录入站、出站消息。
-- 使用独立 JSONL 文件 `~/.hermes/wechat_enhance/messages.jsonl` 存储消息。
-- 提供 `/continue` patch，将命令显式透传给 gateway command router。
-- 提供 footer 控制 patch，在 Weixin adapter 内直接根据 metadata/env 追加 footer。
+### 依赖
+- git
+- bash
 
-安装 hook：
-
+### 安装命令
 ```bash
-mkdir -p ~/.hermes/hooks
-ln -sfn /opt/data/skills/hermes-wechat-enhance/hooks/hermes-wechat-enhance ~/.hermes/hooks/hermes-wechat-enhance
-export PYTHONPATH="/opt/data/skills/hermes-wechat-enhance:${PYTHONPATH:-}"
+cd /opt/data/skills/hermes-wechat-enhance && bash scripts/install.sh
 ```
 
-检查 patch：
-
+### 卸载
 ```bash
-cd /opt/hermes
-git apply --check /opt/data/skills/hermes-wechat-enhance/patches/001-weixin-continue-hook.patch
-git apply --check /opt/data/skills/hermes-wechat-enhance/patches/002-weixin-footer-hook.patch
+cd /opt/data/skills/hermes-wechat-enhance && bash scripts/uninstall.sh
 ```
 
-应用 patch：
-
+### 升级
 ```bash
-cd /opt/hermes
-git apply /opt/data/skills/hermes-wechat-enhance/patches/001-weixin-continue-hook.patch
-git apply /opt/data/skills/hermes-wechat-enhance/patches/002-weixin-footer-hook.patch
+cd /opt/data/skills/hermes-wechat-enhance && bash scripts/update.sh
 ```
 
-## English
+> ⚠️ **安装/升级后必须重启 gateway 才能生效。**
 
-This Hermes WeChat enhancement skill lives entirely under `/opt/data/skills/hermes-wechat-enhance/`. It does not modify `/opt/hermes/` or `/opt/data/hooks/` directly.
+## 环境变量
 
-Features:
+| 变量 | 说明 | 必需 |
+|------|------|------|
+| `HERMES_HOME` | Hermes 主目录路径（默认 `/opt/data`） | ✅ |
+| `HERMES_WECHAT_FOOTER_MODEL_NAME` | 覆盖 footer 中显示的模型名 | 可选 |
+| `GATEWAY_SRC` | Gateway 源码路径 | 由 install.sh 自动检测 |
 
-- Captures inbound and outbound messages through `agent:start` and `agent:end`.
-- Stores messages in the independent JSONL file `~/.hermes/wechat_enhance/messages.jsonl`.
-- Provides a `/continue` patch that explicitly passes the command through to the gateway command router.
-- Provides a footer-control patch that appends the footer inline from metadata/env inside the Weixin adapter.
+## Patch 列表
 
-Hook installation:
+### 001 — /continue 命令拦截
+拦截 WeChat 用户发送的 `/continue` 消息，触发 pending 消息队列的排空（drain），**不路由到 agent 或 gateway command router**，直接返回。
 
-```bash
-mkdir -p ~/.hermes/hooks
-ln -sfn /opt/data/skills/hermes-wechat-enhance/hooks/hermes-wechat-enhance ~/.hermes/hooks/hermes-wechat-enhance
-export PYTHONPATH="/opt/data/skills/hermes-wechat-enhance:${PYTHONPATH:-}"
-```
+### 002 — 消息 footer 追加
+在 WeChat 出站消息末尾追加 footer，包含 token 计数和模型名。从 `HERMES_HOME/config.yaml` 读取配置，自动跳过 system 类消息（`is_system=True`）。
 
-Patch check:
+### 003 — System metadata 标记
+修改 `gateway/run.py` 中的 `_non_conversational_metadata()`，将 lifecycle/status 类发送统一标记为 `is_system: True`（原仅 Discord），确保 WeChat adapter 能正确识别并跳过 system 消息的 footer 处理。
 
-```bash
-cd /opt/hermes
-git apply --check /opt/data/skills/hermes-wechat-enhance/patches/001-weixin-continue-hook.patch
-git apply --check /opt/data/skills/hermes-wechat-enhance/patches/002-weixin-footer-hook.patch
-```
+### 004 — 模型名传播
+在 `gateway/platforms/base.py` 和 `gateway/run.py` 中将 AI agent 响应的 resolved model 名称传播到 thread metadata，供 footer 显示正确的模型名。支持多级 fallback 查找。
 
-Patch apply:
+### 005 — 回复预算与消息队列
+核心 patch。在 `gateway/platforms/weixin.py` 中添加：
 
-```bash
-cd /opt/hermes
-git apply /opt/data/skills/hermes-wechat-enhance/patches/001-weixin-continue-hook.patch
-git apply /opt/data/skills/hermes-wechat-enhance/patches/002-weixin-footer-hook.patch
-```
+- **`ReplyBudgetStore`** — 基于 token 的用户级别回复预算管理，支持持久化存储（JSON 文件），含 TTL 和消息条数上限
+- **`_is_system_meta()`** — 检测 metadata 是否为系统消息，支持 `is_system`、`actor`、`source`、`message_origin`、`origin` 五个字段
+- **`_footer_model_name()`** — 确定 footer 中显示的模型名，优先级：`HERMES_WECHAT_FOOTER_MODEL_NAME` > metadata 中的模型字段 > `"hermes"`（默认）
+
+## 原理
+
+该 skill 通过 patch 方式直接修改 gateway 源码（`gateway/platforms/weixin.py`、`gateway/run.py`、`gateway/platforms/base.py`），为 WeChat adapter 增加：
+
+1. **Message logging** — 通过 `agent:start` / `agent:end` hook 旁路记录入站、出站消息，存储至 `~/.hermes/wechat_enhance/messages.jsonl`
+2. **Footer** — 每条回复自动追加 token 计数和模型名，便于用户直观感知消耗
+3. **`/continue`** — 排空 pending 队列继续未完成的对话，不重新触发 agent
+4. **Budget** — 每个用户基于 token 的回复预算，防止滥用，数据持久化至 `~/.hermes/wechat_enhance/`
