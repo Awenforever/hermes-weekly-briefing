@@ -22,9 +22,13 @@ Delegate coding tasks to [Codex](https://github.com/openai/codex) via the Hermes
 - PR reviews
 - Batch issue fixing
 - **Comprehensive audits** — delegate a deep code review + isolation test, then a follow-up task to fix everything found
-- **Bulk code changes** — this is the primary workflow: delegate all non-trivial code modifications to Codex. The parent agent (庄奕) handles only small fixes, verification, and architectural decisions.
+- **Bulk code changes** — this is the primary workflow: delegate ALL non-trivial code modifications to Codex. The parent agent (庄奕) handles ONLY architecture decisions, planning, and final verification — never bulk implementation.
 
-**Codex-first principle**: Codex handles bulk implementation, the parent agent does architecture, small fixes, and final verification. When in doubt, delegate.
+**Codex-first principle**: Codex handles all implementation. The parent agent's role is: plan → delegate to Codex → verify → delegate next task. When in doubt, delegate. Never do Codex's work yourself — it bloats your context and distracts from the architectural overview.
+
+**Delegation workflow**: Plan the full task → split into independent subtasks → delegate ONE subtask at a time → verify it passed → delegate the next. Never batch unrelated tasks into one Codex call. Never skip verification between subtasks.
+
+**No limits**: Never artificially cap Codex's API calls, iterations, or runtime. Codex uses its own OpenAI models (gpt-5.4/gpt-5.5), not Hermes' configured model. Give Codex whatever tools and permissions it needs. Do NOT set `max_iterations` or similar constraints unless the user explicitly asks.
 
 Requires the codex CLI and a git repository.
 
@@ -101,12 +105,33 @@ apt-get install -y bubblewrap
 
 Codex v0.142.5 uses OpenAI ChatGPT OAuth by default (no API key needed). Check auth with `codex doctor`.
 
-For heavy architecture work, use the strongest available model:
+**Codex is intentionally used for OpenAI models only** — this is the design. Codex's ChatGPT OAuth limits it to OpenAI's own models, and that's exactly why we route tasks to it: Codex gives us access to OpenAI's strongest models (gpt-5.4, gpt-5.5) that Hermes itself doesn't use. For non-OpenAI models (deepseek, etc.), use Hermes directly.
+
+**Tiered model strategy:**
+
+| Model | When | Task class |
+|-------|------|------------|
+| `gpt-5.4` | Daily driver | Normal complex tasks, code fixes, reviews, mid-size refactors |
+| `gpt-5.5` | Heavy lifting | Large multi-file implementations, architecture overhauls, comprehensive audits |
+
 ```
-codex exec -s workspace-write -m gpt-5 "<task>"
+# Normal complexity
+codex exec -m gpt-5.4 --dangerously-bypass-approvals-and-sandbox "Fix the login race condition"
+
+# Large complexity (multi-file, architecture-level)
+codex exec -m gpt-5.5 --dangerously-bypass-approvals-and-sandbox "Implement the new auth module..."
 ```
 
-For smaller fixes, omit `-m` to use the default model.
+For trivial fixes, omit `-m` to use Codex's default model.
+
+## Full Architecture Delegation
+
+For large multi-module implementations (5+ files, architecture-level changes), use the pattern documented in `references/full-architecture-delegation.md`. Key points:
+
+1. Settle design fully before delegating — no back-and-forth
+2. Compose a single comprehensive prompt with implementation order
+3. Use `gpt-5.5` with generous timeout (600s+)
+4. Verify syntax, imports, and file state after completion
 
 ## PR Reviews
 
@@ -160,6 +185,22 @@ terminal(command="gh pr comment 86 --body '<review>'", workdir="~/project")
 
 ## Pitfalls
 
+### Don't artificially limit Codex
+
+**This is the #1 user complaint.** Never set `max_iterations`, API call caps, or arbitrary timeouts on Codex calls unless the user explicitly asks. Codex uses OpenAI's own models (gpt-5.4/gpt-5.5) — it does NOT consume Hermes' configured model or API quota. The `delegation.model` and `delegation.provider` config fields in Hermes' config.yaml are for Hermes sub-agents, not for Codex CLI. Codex has its own auth and model selection.
+
+### Codex model is independent from Hermes config
+
+Codex CLI authenticates via ChatGPT OAuth or `OPENAI_API_KEY`, not through Hermes' provider config. Setting `delegation.model: deepseek-v4-flash-ascend` or `delegation.provider: ustc` does NOT affect Codex — it only affects Hermes' own `delegate_task` sub-agents. Codex always uses OpenAI models (gpt-5.4, gpt-5.5, o3, etc.) via its own auth.
+
+### One task at a time, verify before next
+
+Never batch unrelated tasks into one Codex call. The pattern is: plan → delegate ONE task → verify → delegate next. Batching causes Codex to run out of iterations with partial results. Verification between tasks catches failures early.
+
+### Parent agent should NOT do Codex's work
+
+The parent agent's role is architecture + planning + verification. If you find yourself implementing code changes that Codex should handle, STOP and delegate. Doing implementation work yourself bloats your context and means you're not using Codex for what it's designed for.
+
 ### Auth file in wrong home directory
 
 When running Codex inside a Docker container via `docker exec`, the OAuth file may be in a different user's home than the one running the command. Common case: `hermes` user's home is `/opt/data/` but `codex login` may have written auth to `/opt/data/home/.codex/auth.json`. The Codex CLI checks `~/.codex/auth.json` relative to the current user — root's home is `/root/`, hermes user's home is `/opt/data/`.
@@ -175,13 +216,48 @@ Verify with `codex doctor | grep auth`. Should show `auth is configured`.
 
 ### Model restriction with ChatGPT OAuth
 
-When using Codex with ChatGPT OAuth (not API key), only OpenAI models are supported. Non-OpenAI models (e.g. `deepseek-v4-flash-ascend`, `gpt-5-codex`) fail with:
+Codex with ChatGPT OAuth supports **only OpenAI models** — this is by design, not a bug. Codex is our dedicated gateway to OpenAI's models (gpt-5.4, gpt-5.5). Non-OpenAI models (deepseek, etc.) are handled by Hermes directly.
 
+If you see:
 ```
 ERROR: The '{model}' model is not supported when using Codex with a ChatGPT account.
 ```
+You're trying to use a non-OpenAI model through Codex. Either pick an OpenAI model (`gpt-5.4` / `gpt-5.5`) or route the task through Hermes instead.
 
-Omit `-m` to use Codex's default model, or switch to API key auth for custom providers.
+### Codex CLI eating shell operators from prompt text
+
+**This is the #1 recurring failure pattern.** Codex CLI (`codex exec`) parses shell operators (`&&`, `||`, `|`, `>`, `<`) that appear in the prompt text as its OWN arguments, not as prompt content. The error looks like:
+
+```
+error: unexpected argument 'OK || echo PATCH1' found
+error: unexpected argument 'Hermes' found
+```
+
+This happens when the prompt contains inline shell commands, bash snippets, or pipeline examples. Codex CLI's argument parser treats bare `&&`/`||`/`|` as shell command separators before the prompt ever reaches the LLM.
+
+**Prevention rules:**
+1. **Never** put shell one-liners with operators in Codex prompts. No `grep ... && echo OK || echo FAIL`, no `cmd1 | cmd2`, no `cmd > file`.
+2. **Rewrite** all verification/execution instructions as Python scripts. Instead of "Run `docker ps && docker logs`", say "Write a Python script that calls subprocess.run for docker ps and docker logs, then execute it."
+3. **Use Python as the execution language** for all steps Codex needs to perform. `python3 -c "..."` is safe — `&&` inside Python strings doesn't confuse Codex CLI.
+4. **For complex multi-step procedures**, write the entire procedure as a .py file first, then tell Codex to execute that file. Never embed shell pipelines in the prompt.
+5. **If you absolutely must mention shell syntax**, use quoted examples or heredoc notation, not bare operators.
+
+**Failed patterns (do NOT use):**
+```
+codex exec ... "Run: docker ps && docker logs"     ← ❌
+codex exec ... "git apply --check && echo OK"       ← ❌
+codex exec ... "grep pattern file | wc -l"          ← ❌
+```
+
+**Safe patterns (use these):**
+```
+# Write a script first, then execute it
+codex exec ... "Execute /tmp/my_script.py which does X, Y, Z"
+codex exec ... "Use Python subprocess to run docker commands and check results"
+codex exec ... "Write a verification script, save it, then run it"
+```
+
+This was discovered across 3+ failures in one session (2026-07-06) during Hermes v0.18 migration testing.
 
 ### Shell quoting with SSH + docker exec
 

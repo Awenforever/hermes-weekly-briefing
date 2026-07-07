@@ -231,20 +231,33 @@ The three conditions that ALL must be true: Hermes idle + last speaker is Hermes
 
 ## Development Operations
 
-This skill is part of the **Gateway Module** paradigm — it modifies gateway behavior and requires install/update/uninstall lifecycle management. See the blueprint for full conventions:
+This skill is part of the **Gateway Module** paradigm — it modifies gateway behavior and requires install/update/uninstall lifecycle management.
 
-- **Blueprint:** `/opt/data/skills/hermes-wechat-enhance/references/development-blueprint.md`
+### Blueprints
+
+- **Detailed blueprint:** `/opt/data/skills/hermes-wechat-enhance/references/development-blueprint.md`
 - **Paradigm note:** `~/Work/Hermes/2026-07-07-gateway-module-blueprint/gateway-module-paradigm.md`
 
 ### Key Dev Rules
 
-- **Goal-oriented testing only** — never test "function exists", test "given X → produces Y"
-- **One in, one out** — every new feature offsets by removing dead code
-- **Impact tracking** — when modifying a feature, check IMPACT_MATRIX for what scripts to update
+- **Goal-oriented testing only** — never test "function X exists"; test "given input Y → output Z is correct". Each test must be traceable to a user-visible goal. Tests without goals = delete.
+- **Footer truthfulness** — footer must uniquely and accurately reflect real model source. Never use config.yaml fallback to hide metadata chain bugs. Missing model = show `hermes` honestly, never fake a model name.
+- **One in, one out** — every new feature must be offset by removing dead/unused code. Net growth ≈ zero.
+- **Impact tracking** — when modifying a feature, check `IMPACT_MATRIX.md` to know which scripts/files must be updated.
+- **Anti-bloat** — quarterly audit via `check-consistency.sh` to find stale tests, unused patches, orphaned scripts.
+- **Never deploy without permission** — never start test containers, deploy to production, or modify running gateway without explicit user approval.
+
+### Install / Update / Uninstall Lifecycle
+
+| Action | Command | What it does |
+|--------|---------|-------------|
+| Install | `scripts/install.sh` | detect Hermes version → git pristine → apply patches → install hooks |
+| Update | `scripts/update.sh` | stash → checkout pristine → apply new patches → pop stash |
+| Uninstall | `scripts/uninstall.sh` | git checkout pristine → remove hooks → clean |
 
 ### Cross-Session Recall
 
-New sessions load this SKILL.md via `skill_view()`. All architecture decisions and conventions are documented here — no need to re-discover.
+New sessions load this SKILL.md via `skill_view()`. All architecture decisions and conventions are documented here — no need to re-discover. After any architecture decision or convention change, update this section immediately.
 
 ## Pitfalls
 

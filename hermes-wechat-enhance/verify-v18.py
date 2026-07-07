@@ -153,9 +153,9 @@ else:
 # ============================================================
 print("\n--- 4. _footer_model_name ---")
 fmodel = extract_source(WX, "_footer_model_name")
-fconf  = extract_source(WX, "_footer_config_model_name")
-if fmodel and fconf and ismeta:
-    ns = {}; exec(MOCK + ismeta + "\n" + fconf + "\n" + fmodel, ns)
+ismeta = extract_source(WX, "_is_system_meta")
+if fmodel and ismeta:
+    ns = {}; exec(MOCK + ismeta + "\n" + fmodel, ns)
     fn = ns["_footer_model_name"]
     
     ok("is_system → 'hermes'", fn({"is_system": True}) == "hermes")
@@ -165,7 +165,7 @@ if fmodel and fconf and ismeta:
     ok("routed_model fallback", fn({"routed_model": "claude"}) == "claude")
     ok("model fallback", fn({"model": "gemini"}) == "gemini")
     ok("system overrides all", fn({"is_system": True, "model": "x"}) == "hermes")
-    ok("empty→non-empty", bool(fn({})))
+    ok("empty→hermes", fn({}) == "hermes")
 else:
     ok("footer functions found", False)
 

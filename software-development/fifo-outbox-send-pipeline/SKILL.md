@@ -25,8 +25,12 @@ Use this skill when a message gateway or chat adapter has ordering, quota, or to
 - Appending footer/badge only to the last chunk.
 - Dropping queued entries when token is missing instead of re-queuing or preserving them.
 - Forgetting that a command handler may need to flush pending outbox entries.
-
 ## Verification
+
 - Run the adapter test suite.
 - Confirm FIFO order, exact counter increments, and token-gated flush behavior.
 - Confirm `/continue` or equivalent command restores delivery from the queue.
+
+## Reference Implementation
+
+See `references/weixin-v017-implementation.md` for the WeChat (Weixin) v0.17 production adapter's concrete implementation of this pattern, including BudgetStore, SendQueue, footer format, and porting dependencies.

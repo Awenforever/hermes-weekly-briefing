@@ -171,7 +171,42 @@ class DiscoveryEngine:
 
 Configuration via `sources.yaml` (not hardcoded). Playwright adapter MUST be `enabled: false` by default.
 
-## Codex Delegation Pattern
+## Multi-Platform Adapter Pattern
+
+When building a proactive system that should work across platforms (WeChat, Telegram, Discord, etc.), don't hardcode a single adapter:
+
+```python
+def _resolve_adapter_and_chat_id(self) -> tuple[Any | None, str | None]:
+    """Try weixin first, then iterate all adapters for HERMES_PROACTIVE_{PLATFORM}_CHAT_ID."""
+    for key, adapter in self.adapters.items():
+        platform = getattr(key, "value", str(key))
+        if platform == "weixin":
+            chat_id = os.getenv("HERMES_PROACTIVE_WEIXIN_CHAT_ID", "").strip()
+            if chat_id:
+                return adapter, chat_id
+    for key, adapter in self.adapters.items():
+        platform = getattr(key, "value", str(key))
+        chat_id = os.getenv(f"HERMES_PROACTIVE_{platform.upper()}_CHAT_ID", "").strip()
+        if chat_id:
+            return adapter, chat_id
+    return None, None
+```
+
+This lets users on any platform configure their chat_id via env var and have the hook work immediately. WeChat takes priority only if configured.
+
+## Portability: Use HERMES_HOME
+
+Don't hardcode `/opt/data/`. Hermes sets `HERMES_HOME` env var:
+
+```python
+HERMES_HOME = Path(os.getenv("HERMES_HOME", "/opt/data"))
+SHARED_DIR = HERMES_HOME / "hermes_alive_shared"
+STATE_DB = Path(os.getenv("HERMES_STATE_DB", str(HERMES_HOME / "state.db")))
+```
+
+This lets the hook work on any Hermes installation regardless of data directory location.
+
+## Portability: Use HERMES_HOME
 
 For multi-file architecture changes, delegate to Codex with:
 1. Clear goal (WHAT, not HOW)

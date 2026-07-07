@@ -105,7 +105,7 @@ agent.model → agent_result["model"] → event.model_name
 3. **Context token → budget**: `_budget_store.update_token()` on new context_token
 4. **_drain_pending()**: drains queue with budget check + footer per chunk
 5. **send() rewrite**: text chunks enqueued instead of directly sent
-6. **Footer helpers**: `_is_system_meta()`, `_footer_model_name()`, `_footer_config_model_name()`
+6. **Footer helpers**: `_is_system_meta()`, `_footer_model_name()`
 7. **Control command dedup bypass**: /approve, /deny, /steer, /continue, etc.
 8. **Content heuristic disabled**: `_content_looks_like_system_error` always returns False
 9. **Image metadata fix**: media sends use footer_metadata

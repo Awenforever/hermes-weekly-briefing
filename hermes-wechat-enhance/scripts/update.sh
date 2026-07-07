@@ -56,16 +56,27 @@ apply_patches() {
             done
         done < "$patch_dir/series"
     else
-        for f in "$patch_dir"/*.patch; do
-            [ -f "$f" ] || continue
-            local name="$(basename "$f")"
-            if git apply --check "$f" 2>/dev/null; then
-                git apply "$f"
-                echo "[OK] Applied $name"
-            else
-                echo "[FAIL] Cannot apply $name"
-                exit 1
+        # Flat layout: apply in correct dependency order
+        local ORDERED=(002 003 004 005 001)
+        for patch_id in "${ORDERED[@]}"; do
+            local matched=()
+            for f in "$patch_dir"/${patch_id}-*.patch; do
+                [ -f "$f" ] && matched+=("$f")
+            done
+            if [ ${#matched[@]} -eq 0 ]; then
+                echo "[WARN] No patch found for $patch_id"
+                continue
             fi
+            for f in "${matched[@]}"; do
+                local name="$(basename "$f")"
+                if git apply --check "$f" 2>/dev/null; then
+                    git apply "$f"
+                    echo "[OK] Applied $name"
+                else
+                    echo "[FAIL] Cannot apply $name"
+                    exit 1
+                fi
+            done
         done
     fi
     git add -A

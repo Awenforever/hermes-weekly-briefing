@@ -238,12 +238,35 @@ Provide a CLI for structured JSONL logs. See `references/pipeline-log-query-tool
           return adapter
   ```
 
-### Weixin adapter send()
+### Weixin adapter send() (v0.18+)
+
+For v0.18+, footer is determined by inline patch logic in weixin.py, not by metadata alone. The metadata flag `is_system` controls whether the footer shows `hermes` or the model name:
 
 ```python
+# System message → footer shows "hermes"
 await adapter.send(
-    chat_id="o9cq800ipxRzd6B0ooO0zo2DJ-MU@im.wechat",
-    content="消息文本",
-    metadata={"model_name": "hermes", "is_system": True}
+    chat_id="o9cq800i...",
+    content="状态通知",
+    metadata={"is_system": True}
+)
+
+# Model message → footer shows model name from metadata
+await adapter.send(
+    chat_id="o9cq800i...",
+    content="LLM回复",
+    metadata={"is_system": False, "model_name": "deepseek-v4-pro"}
 )
 ```
+
+**Principle:** "模型的归模型，系统的归系统" — footer reflects message origin via structured metadata, never content heuristics.
+
+For v0.17 with `_resolve_model_name_for_footer()`:
+```python
+await adapter.send(
+    chat_id="...",
+    content="消息",
+    metadata={"model_name": "hermes", "is_system": True, "actor": "system"}
+)
+```
+
+**WARNING: test gateways share WeChat credentials.** Starting a test gateway with the same Weixin data directory will connect to the same WeChat account and disrupt the production session (duplicate polling, state mismatch). Never test with real WeChat credentials active.

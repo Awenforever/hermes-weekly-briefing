@@ -235,6 +235,64 @@ git add -A && git commit -m "feat: complete [feature name] implementation"
 - Dispatch a new fix subagent with specific instructions about what went wrong
 - Don't try to fix manually in the controller session (context pollution)
 
+## Codex-Specific Patterns
+
+### Scope Limits
+
+Codex (via `delegate_task` or `terminal codex exec`) has a hard limit of **50 tool calls**. When hit, it exits with `max_iterations` without producing a final response. Keep delegated tasks to **6-8 items max**. For larger changesets, split into multiple smaller delegations.
+
+### Model Selection
+
+| Model | Best for |
+|-------|----------|
+| `deepseek-v4-flash-ascend` | Implementation, code changes |
+| `gpt-5.4` | Deep audit — found bugs the implementation model missed |
+
+Use `codex exec -m gpt-5.4` for comprehensive code audits. It catches subtle bugs (race conditions, logic inversions, dead code) that faster models skip.
+
+### Pre-Delegation Snapshot
+
+**Always commit before delegating.** This gives you a clean rollback point and lets you verify what Codex actually changed:
+
+```bash
+git add -A && git commit -m "snapshot: before Codex delegation"
+# ... delegate ...
+git diff HEAD  # verify what changed
+```
+
+### Post-Delegation Verification
+
+Codex often hits `max_iterations` before syncing files, running syntax checks, or committing. **Always verify and finish yourself:**
+
+```bash
+# 1. Check what files were modified
+git diff --stat HEAD
+
+# 2. Syntax check all changed .py files
+for f in $(git diff --name-only HEAD -- '*.py'); do
+  python3 -c "import ast; ast.parse(open('$f').read())" && echo "$f: OK"
+done
+
+# 3. Sync skill hooks ↔ runtime hooks (if dual-repo)
+cp runtime/file.py skill/file.py
+
+# 4. Commit both repos
+```
+
+### Avoiding Re-Work
+
+When delegating a continuation of previous work, explicitly tell Codex what's done vs what's not:
+
+```
+⚠️ 这是接续上一次未完成的工作。先读文件了解现状，不要重复已做的工作。
+已完成：... 
+还需要做：...
+```
+
+### Codex May Not Have File Permissions
+
+Codex uses the same filesystem tools as the parent agent. If it appears stuck, it's hitting `max_iterations`, not a permission issue. Fix by reducing scope or splitting tasks.
+
 ## Pitfalls & Workarounds
 
 ### write_file Path Protection

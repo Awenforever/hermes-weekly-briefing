@@ -9,19 +9,21 @@ This skill provides Hermes WeChat enhancement artifacts without modifying the pr
 
 ## Contents
 
-- `hooks/hermes-wechat-enhance/`: Hermes hook package. Subscribes to `agent:start` and `agent:end` only — captures inbound/outbound messages to JSONL store. `command:continue` and `message:send` are handled via inline patches, not hooks (v0.18 adapter lacks `_hooks`).
+- `hooks/hermes-wechat-enhance/`: Hermes hook package. Subscribes to `agent:start` and `agent:end` only — captures inbound/outbound messages to JSONL store.
 - `hermes_wechat_enhance/`: self-contained Python helpers used by the hook handler.
-- `patches/001-weixin-continue-hook.patch`: Inline /continue interception in intake method — calls `_drain_pending()` and returns early, never routes to gateway command router. **Must be applied LAST (after 005).**
-- `patches/002-weixin-footer-hook.patch`: Inline footer: model name from metadata/env.
-- `patches/003-gateway-system-metadata.patch`: Tag system messages with `is_system=True`.
-- `patches/004-gateway-model-propagation.patch`: Propagate agent.model→event→metadata.
-- `patches/005-weixin-send-queue.patch`: ReplyBudgetStore + MessageSendQueue + _drain_pending + footer count. **Must be applied AFTER 002.**
-- `CUSTOMIZATIONS.md`: **Complete modification checklist for upgrades.** Maps every custom feature to its patch, file, and line count. Includes upgrade protocol and per-patch hazard notes. Read this first when upgrading to v0.19+.
-- `patches/002-weixin-footer-hook.patch`: optional gateway patch to append the Weixin footer inline from metadata/env.
-- `verify-v18.py`: **Functional verification script** — 63 behavioral checks covering ReplyBudgetStore, MessageSendQueue, `_is_system_meta`, `_footer_model_name`, and /continue control flow. Extracts source via AST, mocks dependencies, and tests actual logic (not just `grep` for existence). Run after every patch regeneration.
-- `CUSTOMIZATIONS.md`: Complete modification checklist for v0.18 → v0.19+ upgrades. Every customization mapped to its patch, with upgrade hazards and protocol.
-- `references/architecture-analysis.md`: Codex research — hook event gaps, source locations, decision log.
-- `references/v017-full-audit.md`: Line-level diff methodology for v0.17→v0.18 audit.
+- `patches/001-weixin-continue-hook.patch`: /continue interception. **Must be applied LAST.**
+- `patches/002-weixin-footer-hook.patch`: Inline footer model name from metadata.
+- `patches/003-gateway-system-metadata.patch`: Tag system messages `is_system=True`.
+- `patches/004-gateway-model-propagation.patch`: agent.model → event → metadata chain.
+- `patches/005-weixin-send-queue.patch`: ReplyBudgetStore + MessageSendQueue + footer count.
+- `CUSTOMIZATIONS.md`: Complete modification checklist + upgrade protocol.
+- `IMPACT_MATRIX.md`: Change impact tracking — which scripts to update when modifying a feature.
+- `scripts/install.sh`: One-command install (version detect → git pristine → apply patches → hooks).
+- `scripts/update.sh`: Revert to pristine → apply new patches → restore user changes.
+- `scripts/uninstall.sh`: Git checkout pristine → remove hooks.
+- `scripts/check-consistency.sh`: Audit patches vs docs cross-references.
+- `verify-v18.py`: Functional verification (63 checks).
+- `references/development-blueprint.md`: **Cross-session recall anchor** — architecture, conventions, lifecycle, task list.
 
 ## Install Hooks
 
@@ -36,6 +38,12 @@ Make the helper package importable by the gateway hook runtime:
 
 ```bash
 export PYTHONPATH="/opt/data/skills/hermes-wechat-enhance:${PYTHONPATH:-}"
+```
+
+**Note:** The `hermes-wechat-enhance` hook also requires `PYTHONPATH` to include the skill directory. Without it, the hook handler's imports fail with `ImportError`. Set this in your Dockerfile or environment configuration:
+
+```dockerfile
+ENV PYTHONPATH="/opt/data/skills/hermes-wechat-enhance:${PYTHONPATH}"
 ```
 
 Restart Hermes gateway after installing the hook.
@@ -134,7 +142,16 @@ This approach was forced by the user after a painful v0.18 migration where piece
 
 ## Footer Controls
 
-The Weixin footer patch reads metadata directly. If `is_system` is True → `hermes`. Otherwise reads `model_name` from metadata (populated by patch 004 from the agent's real model). The `HERMES_WECHAT_FOOTER_MODEL_NAME` env var can override. Never falls back to config.yaml.
+The Weixin footer patch reads metadata directly. If `is_system` is True → `hermes`. Otherwise reads from a strict fallback chain:
+
+1. `HERMES_WECHAT_FOOTER_MODEL_NAME` env var
+2. `metadata.model_name`
+3. `metadata.resolved_model`
+4. `metadata.routed_model`
+5. `metadata.model`
+6. `"hermes"` (hardcoded final fallback — **never** reads config.yaml)
+
+**Config.yaml fallback is forbidden.** If metadata lacks a model name, the footer shows "hermes". Reading config.yaml's `model.default` would hide propagation chain bugs — the fix is to ensure the gateway passes the real model name, not to mask the absence with a default.
 
 - `HERMES_WECHAT_FOOTER_MODEL_NAME`: overrides the non-system footer model name.
 
@@ -256,7 +273,7 @@ Full three-way diff: official v0.17.0 vs production v0.17, then official v2026.7
 | 12 | **Content heuristic disabled** | `_content_looks_like_system_error()` always returns False |
 | 13 | **Budget store init + restore** | ReplyBudgetStore created in `__init__`, restored in `connect()` |
 | 14 | **Footer model resolution** | `_resolve_model_name_for_footer()`: is_system→hermes, else metadata→model |
-| 15 | **Config fallback** | `_default_model_name_for_footer()` reads config.yaml as last resort |
+| 15 | **Config fallback removed** | `_footer_model_name()` never reads config.yaml — final fallback is `"hermes"` |
 | 16 | **Queue metadata footer** | Per-chunk footer attribution in drain loop |
 | 17 | **Footer format** | `chunk + "\n\n---\n\n`{count}` `{model}`"` |
 
@@ -311,22 +328,22 @@ All five patches must be applied in order **(002→003→004→005→001)** on v
 
 Patch 005 is the largest (~330 lines) — it adds the queue/drain infrastructure and the `` `{count}` `{model}` `` footer format.
 
-### Gateway Startup Requirements (P1)
+### Gateway Startup Requirements
 
-For the gateway to send startup-ready notifications and load hooks:
+For the gateway to load hooks:
 
 1. **Include `--accept-hooks`** in the gateway run command:
    ```bash
    hermes gateway run --replace --force --no-supervise --accept-hooks -v
    ```
 
-2. **Ensure Hermes Alive hook is installed** (provides startup notification):
+2. **Ensure Hermes Alive hook is installed** (handles startup notification):
    ```bash
    mkdir -p ~/.hermes/hooks
    ln -sfn /opt/data/hooks/hermes-alive ~/.hermes/hooks/hermes-alive
    ```
 
-3. **Startup ready notification** is controlled by env var:
+3. **Startup ready notification** is handled by Hermes Alive handler. On `gateway:startup`, it sends "Hermes Alive ready." via the WeChat adapter. Controlled by env var:
    ```bash
    HERMES_WEIXIN_STARTUP_READY_NOTIFY=1  # default: enabled
    ```
@@ -355,11 +372,57 @@ Without `--accept-hooks`, the gateway will NOT load any hooks, including Hermes 
 
 Adds `ReplyBudgetStore`, `MessageSendQueue`, `_drain_pending()`, and the `` `{count}` `{model}` `` footer format. ~330 lines.
 
-**Footer model resolution** (fixed 2026-07-07): Now uses `_footer_model_name(metadata)` helper which checks `_is_system_meta()` for multi-field system detection (is_system/actor/source/message_origin/origin), then a strict fallback chain: env var → metadata.model_name → resolved_model → routed_model → model → `_footer_config_model_name()` → `"hermes"`. Previously only checked `is_system` and had `"error"` fallback.
+**Footer model resolution** (fixed 2026-07-07): Now uses `_footer_model_name(metadata)` helper which checks `_is_system_meta()` for multi-field system detection (is_system/actor/source/message_origin/origin), then a strict fallback chain: env var → metadata.model_name → resolved_model → routed_model → model → `"hermes"`. **Never reads config.yaml.** Config fallback would hide metadata chain bugs — the last resort is always `"hermes"`.
 
 ## Notes
 
 `MessageStore` is self-contained and uses only Python standard library modules.
+
+## ⚠️ Never Deploy Without Permission
+
+**Do NOT start test containers, deploy to production, or modify running gateway instances without explicit user approval.** The user has strict deployment protocols (audit → confirm → rollback plan → execute). Violating this creates chaos — a test container connected to the same WeChat account will process messages in parallel with production, causing duplicate responses and rate-limit conflicts.
+
+## ⚠️ Footer Truthfulness — No Fake Fallbacks
+
+**Footer MUST uniquely and accurately reflect the actual content source. Never use fallbacks that hide bugs.** If the model name is missing from metadata, the fix is to trace and repair the propagation chain (patch 004), NOT to add a config.yaml fallback that silently shows a plausible-but-wrong model name. A footer of `hermes` or `error` is honest — a footer of `deepseek-v4-pro` when the actual model was something else is a lie. The user rejected this explicitly: "我要真实模型来源，不是要你给我弄个假的展示。"
+
+## Development Operations Lifecycle
+
+This skill modifies gateway source code — it is NOT a pure drop-in skill. It requires git-based state management for install/update/uninstall.
+
+### Planned Architecture (not yet implemented)
+
+```
+hermes-wechat-enhance/
+├── scripts/
+│   ├── install.sh      ← detect version → git init → pristine commit → apply patches → hooks
+│   ├── update.sh       ← revert to pristine → apply new patches
+│   ├── uninstall.sh    ← git checkout pristine → remove hooks
+│   └── verify.sh       ← goal-oriented behavioral tests
+├── IMPACT_MATRIX.md    ← maps change type → which scripts/files must update
+├── patches/
+│   ├── v0.17/          ← version-specific patch sets
+│   └── v0.18/
+└── check-consistency.sh ← scan all scripts vs patches/ directory for drift
+```
+
+### Testing Philosophy: Goal-Oriented, NOT Existence-Checking
+
+**Never test "does function X exist" — test "given input Y, does the system produce output Z?"** Existence tests give false confidence. The user explicitly rejected this: "你的很多测试都只验证函数/类存不存在, 而不是goal为导向的测试, 这容易导致,很多内容你声称完成了,但实际上运行不通."
+
+| ❌ Bad test | ✅ Good test |
+|------------|-------------|
+| `ReplyBudgetStore` class exists? | Budget exhausted → drain rejects send with error |
+| `_footer_model_name()` function exists? | `{is_system:True}` → output `"hermes"` |
+| `/continue` interception code exists? | `/continue` received → `_drain_pending()` called, message NOT routed to agent |
+
+Each test must be traceable to a user-facing requirement. Tests without a corresponding goal should be removed.
+
+### Anti-Bloat Rules
+
+- **One patch, one responsibility.** Never mix concerns in a single patch.
+- **One in, one out.** Every new feature must offset by removing dead code.
+- **Quarterly audit.** Run `check-consistency.sh` to find stale tests, unused patches, and orphaned scripts.
 
 **v0.17 → v0.18 behavior change:** v0.18's official `weixin.py` removed `_drain_pending()`, `_resolve_model_name_for_footer()`, `ReplyBudgetStore`, and `MessageSendQueue`. The adapter no longer does reply-budget tracking or footer metadata injection.
 

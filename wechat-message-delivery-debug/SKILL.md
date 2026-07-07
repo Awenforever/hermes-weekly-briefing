@@ -5,7 +5,15 @@ description: Debug WeChat (Weixin) message delivery and footer tag issues in Her
 
 # WeChat Message Delivery Debug
 
+> **⚠️ v0.18+ fix implementations live in `hermes-wechat-enhance`.**  
+> This skill covers root cause diagnosis and debugging patterns. For the actual patch-based fixes (ReplyBudgetStore, /continue, footer, model propagation, system metadata), load `hermes-wechat-enhance`. The CUSTOMIZATIONS.md there is the single source of truth for what was changed and how.
+
 Use this skill when Weixin messages split, rate-limit, fail to send, or show the wrong footer tag (`hermes`, actual model, or `error`).
+
+## User Preferences
+
+- **Root cause over symptom fixes**: Do not patch individual occurrences. Trace the full data/metadata flow end-to-end to find WHY a class of messages is wrong, then fix at the source.
+- **Behavioral verification over existence checks**: When writing verification scripts, test actual function behavior (class instantiation, method calls, edge cases), not just `grep` for function/class names. Extract source via `ast.get_source_segment()`, mock dependencies, and test real logic.
 
 ## What to check first
 
@@ -18,14 +26,36 @@ Use this skill when Weixin messages split, rate-limit, fail to send, or show the
    - assistant/model output → should tag actual model name
    - missing metadata → will fall back to `error`
 
+## ⚠️ Footer Principle (User Mandate)
+
+> **"永远不要让fallback掩盖bug。Footer必须唯一准确反映内容来源。"**
+
+Translation: Never let fallback logic mask a bug. Footer must uniquely and accurately reflect the true content source.
+
+| Source | Footer | 
+|--------|--------|
+| Agent LLM response | Actual model name (e.g. `deepseek-v4-pro`) |
+| System/control message | `hermes` |
+| Hermes Alive proactive message | `deepseek-v4-flash-ascend` (its actual model) |
+| Unknown / metadata missing | `hermes` (default to system, NOT config.yaml) |
+
+**Forbidden**: Reading `config.yaml` `model.default` as footer fallback. This hides metadata propagation bugs by showing the default model instead of the real one.
+
 ## Tag rules
 
 The Weixin footer logic should stay strict:
 - `is_system=True` or `actor=system` → `hermes`
 - non-reserved `model_name` / `model` → use that model name
-- otherwise → `error`
+- otherwise → `hermes` (not config.yaml, not `error`)
 
-Do **not** mask missing metadata by inventing a fake model label.
+Do **not** mask missing metadata by inventing a fake model label. If the metadata chain is broken, `hermes` is the honest answer — it means "we don't know the model, so this is likely a system message."
+
+## Verification pattern
+
+When verifying footer correctness, use behavioral tests over existence checks:
+- **Wrong**: `grep "function_name" file.py` — only proves the function exists
+- **Right**: Extract source via `ast.get_source_segment()`, mock dependencies, and test actual logic with edge cases
+- See `hermes-wechat-enhance/verify-v18.py` for a 63-check functional verification script that tests ReplyBudgetStore, MessageSendQueue, `_is_system_meta()`, `_footer_model_name()`, and /continue control flow with real inputs.
 
 ## Common root cause: metadata arrives too early or incomplete
 
@@ -73,29 +103,71 @@ Any `send()` call whose metadata dict lacks `model_name`, `is_system`, or `actor
 
 A very common failure mode in Hermes is that the agent has already chosen a model, but the footer path still sees no model metadata.
 
-### Hermès-specific bug we found
+### Root cause: missing metadata propagation (v0.17→v0.18 regression)
 
-`_run_agent()` may return a valid `agent_result["model"]`, but `event.resolved_model` and `event.source.model_name` can still be `None` by the time `base.py` sends the final response.
+The v0.18 migration **removed two critical code blocks** that v0.17 had as custom patches. Both must exist for the footer to show the actual model name. When either is missing, the footer renders `error` (or a fake config-based fallback — see anti-pattern below).
 
-When that happens:
-- `base.py` builds metadata like `{'actor': 'agent'}` only
-- `weixin.py send()` cannot see a model name
-- footer becomes `error`
+### Block 1: run.py — set event.model_name from agent_result
 
-### Fix pattern
+In `_handle_message_with_agent()`, after `agent_result` is returned from `_run_agent()`, the model name must be propagated to the event object so `base.py` can read it later. `agent_result["model"]` contains the REAL model used (`getattr(_agent, "model")`), not a config default.
 
-After `_run_agent()` returns, write the returned model back to the event before any final send:
-- `event.resolved_model = agent_result["model"]`
-- `event.source.model_name = agent_result["model"]` (if source exists)
+The missing code (v0.18 location: after stale-result check, before `response = agent_result.get("final_response")`):
 
-### Verification pattern
+```python
+# Propagate resolved model to event for platform footer metadata
+_result_model = ""
+if isinstance(agent_result, dict):
+    for _key in ("model_name", "resolved_model", "routed_model", "model"):
+        _candidate = str(agent_result.get(_key) or "").strip()
+        if _candidate:
+            _result_model = _candidate
+            break
+if _result_model:
+    setattr(event, "model_name", _result_model)
+    setattr(event, "resolved_model", _result_model)
+    setattr(event, "message_origin", "model")
+    try:
+        setattr(event.source, "model_name", _result_model)
+        setattr(event.source, "resolved_model", _result_model)
+    except Exception:
+        pass
+```
 
-Compare these log lines:
-- `[RUN] _run_agent returned: event.resolved_model=... agent_result.model=...`
-- `[BASE] _resolved=... event.resolved_model=... event.source.model_name=...`
-- `[Weixin] send() metadata=...`
+### Block 2: base.py — propagate event.model_name to _thread_metadata
 
-If the first line has a model but the second/third do not, the propagation step is missing.
+In the send handler (inside `_process_message_background` or the equivalent), before `_final_thread_metadata = _mark_notify_metadata(_thread_metadata)`, the model name must be read from the event and written into the metadata dict that goes to `adapter.send()`:
+
+```python
+# Preserve the actual model used by this turn in platform send metadata
+_model = ""
+_source = getattr(event, "source", None)
+for _candidate in (
+    getattr(event, "resolved_model", None),
+    getattr(event, "model_name", None),
+    getattr(_source, "resolved_model", None),
+    getattr(_source, "model_name", None),
+):
+    _candidate = str(_candidate or "").strip()
+    if _candidate:
+        _model = _candidate
+        break
+if _model:
+    _thread_metadata["model_name"] = _model
+```
+
+### The metadata flow (must be intact end-to-end)
+
+```
+agent._model → agent_result["model"] → event.model_name → _thread_metadata["model_name"] → adapter.send(metadata) → weixin footer
+```
+
+If ANY link in this chain is broken, the footer has no model name.
+
+### Anti-pattern: config.yaml fallback in footer
+
+Do NOT add config.yaml fallback logic to the footer. Config holds the **default** model, not the **actual** model used for this specific turn. When a user routes a message to `gpt-5.5` but `config.yaml` says `deepseek-v4-pro`, the config fallback would show the wrong model. The correct fix is ALWAYS to ensure the metadata carries the real model name through the full chain above.
+
+An `error` footer means the metadata chain is broken — fix the chain, don't paper over it.
 
 ## Cron delivery metadata propagation
 
@@ -195,16 +267,25 @@ User sends /resume
   → weixin.py send() line 1644: metadata has only thread_id → footer = "error"
 ```
 
-### Dispatch path for agent responses
+### Dispatch path for agent responses (v0.18 — propagation MISSING by default)
+
 ```
 User sends text message
-  → run.py _handle_message() → _handle_message_with_agent() line 3569
-  → run.py _run_agent() line 8306: returns agent_result with model name
-  → run.py line ~8808: writes resolved_model to _assistant_thread_metadata, stream_consumer.metadata
-  → base.py _process_message_background() line 1691: response = await self._message_handler(event)
-  → base.py line 1779: _send_with_retry(content=response, metadata=_thread_metadata)
-  → if _thread_metadata only has thread_id → footer = "error"
-  → if model was propagated correctly → footer = actual model name
+  → run.py _handle_message_with_agent()
+  → run.py _run_agent(): returns agent_result with "model" field (= real model from agent)
+  → ❌ v0.18 MISSING: event.model_name not set from agent_result["model"]
+  → base.py handler: _thread_metadata built from event.source
+  → ❌ v0.18 MISSING: _thread_metadata["model_name"] not populated from event
+  → adapter.send(content, metadata=_thread_metadata)
+  → weixin.py send(): metadata has no model_name → footer = "error"
+```
+
+With BOTH fixes in place:
+
+```
+  → ✅ run.py: event.model_name = agent_result.get("model")
+  → ✅ base.py: _thread_metadata["model_name"] = event.model_name
+  → adapter.send(metadata) carries model_name → footer = actual model
 ```
 
 ### Three specific `"error"` messages

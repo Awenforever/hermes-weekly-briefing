@@ -93,6 +93,56 @@ Handler signature: `async def handle(event_type: str, context: dict) -> None`
 
 ## Key Patterns
 
+### Inline Gateway Patches (v0.18+)
+
+The `_hooks.emit_collect()` hybrid pattern (below) only works for adapters that carry a hooks reference. **As of v0.18, the WeixinAdapter does NOT have `self._hooks`.** The hooks system lives on the Gateway object (`run.py`), not the adapter.
+
+**For v0.18+ adapter-level changes (weixin.py):** Use **inline patches** — inject the logic directly into the adapter class without any hook round-trip:
+
+- Footer: read `metadata.get("is_system")` directly in `send()`, no `emit_collect()`
+- /continue: pass through to gateway command router in `_process_message()`, no hook
+- Hook handler.py only subscribes to gateway-level events (`agent:start`, `agent:end`)
+
+Patch as file:
+```diff
+@@ -1886,6 +1886,10 @@
++            footer_metadata = dict(metadata or {})
++            if footer_metadata.get("is_system") is True:
++                footer_model_name = "hermes"
++            else:
++                footer_model_name = footer_metadata.get("model_name") or "error"
+             chunks = [c for c in self._split_text(self.format_message(final_content))]
+```
+
+**Rules for inline patches:**
+- Target minimum lines — 10-20 lines per patch
+- No `self._hooks` or `emit_collect()` — the adapter doesn't have them
+- Gateway-level system tagging (is_system metadata) goes in a separate run.py patch
+- Verify with `git apply --check` before shipping
+- Regenerate patches per Hermes version (archive old ones with version suffix)
+
+### Hook + Minimal Patch Hybrid (v0.17 Legacy)
+
+**⚠️ DEPRECATED for v0.18+.** This pattern relied on `self._hooks` being available on the adapter, which was removed in v0.18. Kept for reference and for adapter classes that DO expose `self._hooks`.
+
+When a hook event doesn't exist and the adapter HAS `self._hooks`, inject `emit_collect()` at the right call site:
+
+```python
+# Patch inserted in adapter before local handler:
+if self._hooks:
+    results = await self._hooks.emit_collect("event:name", hook_ctx)
+```
+
+Patch as file:
+```diff
+@@ -1672,6 +1672,15 @@
++            if self._hooks:
++                results = await self._hooks.emit_collect("event:name", hook_ctx)
+             original_handler_logic()
+```
+
+Use `emit_collect()` (not `emit()`) so hooks can return decisions. Verify with `git apply --check`.
+
 ### Using Gateway Internals Without Modifying Source
 ```python
 # In handler.py

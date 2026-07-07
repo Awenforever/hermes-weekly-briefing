@@ -112,32 +112,17 @@ ssh vive@192.168.125.12 "docker logs hermes-hermes-1 --tail 10"
 ssh vive@192.168.125.12 "cd /volume2/@appstore/com.ugreen.docker.hermes && docker compose restart hermes"
 ```
 
-### Hermes Alive 主动消息系统（2026-07-04 部署）
+### Hermes Alive 主动消息系统（2026-07-06 更新至 v2.3）
 
-通过 Gateway hook (`gateway:startup`) 实现的原生主动消息系统，已部署到生产环境。
+Gateway hook 实现的主动消息系统，已开源至 github.com/Awenforever/hermes-alive。
 
-**架构**：Watcher (5min tick) → MoodEngine → CooldownManager → LLM 生成 → 格式清洗 → 微信推送
-
-**关键决策**：
-- 零侵入 hook 部署 (`/opt/data/hooks/hermes-alive/`)，不修改 `/opt/hermes/` 源码
-- 单次 LLM 调用 + 基础清洗（去格式化垃圾、非空、不超长）。**不使用双重 LLM 验证**——对朋友聊天来说是过度设计
-- 语气定位：随意、懒、像微信聊天不是写作文。允许废话（"干嘛呢""好困"）
-- 天气数据仅供参考，绝大多数时候不提（避免话题单一）
-- 通过 `proactive_context.md` 注入用户画像和近期上下文，标注"仅参考，不必每句都提"
-- Discovery 引擎：24h 间隔扫描 arXiv/GitHub/HN + 本地 TODO/git log/日志异常，允许空结果
-- 容器时区必须设为 `TZ=Asia/Shanghai`（UTC 会导致时段错位）
-
-**调参**：
-- `HERMES_PROACTIVE_LLM_VALIDATE=0` — 关验证
-- `HERMES_PROACTIVE_DISCOVERY_INTERVAL_SECONDS=86400` — 24h
-- `HERMES_PROACTIVE_LLM_ENABLED=true` — LLM 生成（否则用模板）
-
-**prompt 迭代教训**：
-1. 给天气数据 → LLM 每句都聊天气 → 加"天气提醒"明确说忽略
-2. "诗意/哲学"引导词 → 输出假文艺 → 改为"可以懒、碎、没头没尾"
-3. 缺乏上下文 → 消息像另一个人的 → 注入 user profile + "仅供参考"
-
-详见 skill `hermes-gateway-hooks` 及 `references/proactive-prompt-template.md`。
+**v2.3 关键架构**：
+- ContextQueue：内存消息队列 + `context_queue.json` 持久化，替代脆弱的 `agent:end` 依赖
+- Activity Guard 三层：session busy（干活中不打扰）→ last role 是 user（等回复不打扰）→ 最后消息 <30min（刚活跃不打扰）
+- Session 状态机：`session:start` → busy，`agent:end` → idle
+- Voice Genome：9维性格向量，事件驱动进化，social_urge 驱动冷却间隔
+- Discovery：10平台，4h 间隔（非24h）
+- deploy.sh 自动检测时区并写入 .env，无需手动设 TZ
 
 ### 文件规则
 
@@ -153,3 +138,7 @@ ssh vive@192.168.125.12 "cd /volume2/@appstore/com.ugreen.docker.hermes && docke
 ### 执行中断规则
 
 执行长任务或复杂操作时，遇到任何问题（工具失败、环境异常、不确定性超过阈值）**必须先暂停向用户确认**，不要自行假设或绕过。用户需要保持对关键决策的控制权。
+
+### 对外文案风格
+
+写社交媒体文案（小红书、推文等）时：不要写成 AI 风格。不用 bullet points、不用过度结构化、不用"最离谱的是""不是噱头"这类营销腔。像普通人聊天一样——短句、随意、带点情绪、像在跟朋友分享一个发现。用户会指出"太AI了"——听到就立刻重写，不要辩解。

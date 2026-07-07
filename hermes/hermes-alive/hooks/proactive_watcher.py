@@ -411,17 +411,11 @@ class ProactivePlatformWatcher:
             return False
 
     def _user_active_recently(self) -> bool:
-        """Check if proactive message should be suppressed due to recent activity.
+        """Return True when Alive should suppress proactive sending.
 
-        Returns True (suppress) if ANY of:
-        - Hermes is currently processing a session
-        - The last message is from the user (user is waiting for a reply)
-        - The last message (from either side) was < 30 minutes ago
-
-        Only allows proactive messages when the conversation is truly idle:
-        no session is running, Hermes sent the last message, and the entire
-        conversation has been silent for 30+ minutes.  This prevents Alive from
-        interrupting while Hermes is still working on a long task.
+        Allow only when all three activity-guard conditions are true:
+        session is idle, the latest Weixin message is from Hermes, and that
+        Hermes message is at least 30 minutes old.
         """
         try:
             from context_tracker import activity_snapshot, is_session_busy
@@ -432,20 +426,23 @@ class ProactivePlatformWatcher:
 
             snapshot = activity_snapshot(refresh=True)
             if not snapshot.get("has_context"):
+                logger.debug("Activity guard: no conversation context, allowing")
                 return False
 
-            now = time.time()
             last_role = snapshot.get("last_message_role")
-            if last_role == "user":
-                logger.debug("Activity guard: last message is from user, suppressing")
+            if last_role != "assistant":
+                logger.debug("Activity guard: last message role is %r, suppressing", last_role)
                 return True
 
             last_msg_ts = snapshot.get("last_message_timestamp")
-            if last_msg_ts is not None:
-                seconds_since_last = now - float(last_msg_ts)
-                if seconds_since_last < 1800:
-                    logger.debug("Activity guard: last message %.0fs ago (< 1800s), suppressing", seconds_since_last)
-                    return True
+            if last_msg_ts is None:
+                logger.debug("Activity guard: Hermes last-message timestamp missing, suppressing")
+                return True
+
+            seconds_since_last = time.time() - float(last_msg_ts)
+            if seconds_since_last < 1800:
+                logger.debug("Activity guard: Hermes last message %.0fs ago (< 1800s), suppressing", seconds_since_last)
+                return True
 
             return False
         except Exception:
