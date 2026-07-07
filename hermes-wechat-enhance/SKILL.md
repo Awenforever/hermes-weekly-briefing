@@ -11,9 +11,15 @@ This skill provides Hermes WeChat enhancement artifacts without modifying the pr
 
 - `hooks/hermes-wechat-enhance/`: Hermes hook package. Subscribes to `agent:start` and `agent:end` only — captures inbound/outbound messages to JSONL store. `command:continue` and `message:send` are handled via inline patches, not hooks (v0.18 adapter lacks `_hooks`).
 - `hermes_wechat_enhance/`: self-contained Python helpers used by the hook handler.
-- `patches/001-weixin-continue-hook.patch`: Inline /continue interception in intake method — calls `_drain_pending()` and returns early, never routes to gateway command router. **Must be applied LAST (after 005) because it depends on `_drain_pending()` added by patch 005.**
-- `patches/002-weixin-footer-hook.patch`: optional gateway patch to append the Weixin footer inline from metadata/env.
+- `patches/001-weixin-continue-hook.patch`: Inline /continue interception in intake method — calls `_drain_pending()` and returns early, never routes to gateway command router. **Must be applied LAST (after 005).**
+- `patches/002-weixin-footer-hook.patch`: Inline footer: model name from metadata/env.
+- `patches/003-gateway-system-metadata.patch`: Tag system messages with `is_system=True`.
+- `patches/004-gateway-model-propagation.patch`: Propagate agent.model→event→metadata.
+- `patches/005-weixin-send-queue.patch`: ReplyBudgetStore + MessageSendQueue + _drain_pending + footer count. **Must be applied AFTER 002.**
+- `CUSTOMIZATIONS.md`: **Complete modification checklist for upgrades.** Maps every custom feature to its patch, file, and line count. Includes upgrade protocol and per-patch hazard notes. Read this first when upgrading to v0.19+.
+- `verify-v18.sh`: **Automated verification script.** 25+ checks: compilation, class existence, method signatures, metadata flow. Run after applying patches.
 - `references/architecture-analysis.md`: Codex research — hook event gaps, source locations, decision log.
+- `references/v017-full-audit.md`: Line-level diff methodology for v0.17→v0.18 audit.
 
 ## Install Hooks
 
@@ -42,22 +48,24 @@ The hook stores captured messages in:
 
 Each record includes `message_id`, `platform`, `user_id`, `chat_id`, `session_id`, `direction`, `content`, `timestamp`, and `model_name`.
 
-## Optional Patches
+## Applying Patches
 
-The patches are intentionally stored but not applied. To review:
-
-```bash
-cd /opt/hermes
-git apply --check /opt/data/skills/hermes-wechat-enhance/patches/001-weixin-continue-hook.patch
-git apply --check /opt/data/skills/hermes-wechat-enhance/patches/002-weixin-footer-hook.patch
-```
-
-To apply in a controlled maintenance window:
+All five patches (002→003→004→005→001) must be applied to restore full v0.17-equivalent functionality. To review and apply:
 
 ```bash
 cd /opt/hermes
-git apply /opt/data/skills/hermes-wechat-enhance/patches/001-weixin-continue-hook.patch
-git apply /opt/data/skills/hermes-wechat-enhance/patches/002-weixin-footer-hook.patch
+# Check each patch
+for p in 002 003 004 005 001; do
+  git apply --check /opt/data/skills/hermes-wechat-enhance/patches/${p}-*.patch
+done
+
+# Apply in correct order
+for p in 002 003 004 005 001; do
+  git apply /opt/data/skills/hermes-wechat-enhance/patches/${p}-*.patch
+done
+
+# Verify
+bash /opt/data/skills/hermes-wechat-enhance/verify-v18.sh /opt/hermes/gateway
 ```
 
 ### Patch Versioning
@@ -102,9 +110,25 @@ See `references/v018-migration-pitfalls.md` for config format changes and contai
 
 **Principle:** Read the real model from the agent object. Never fall back to config. Config is not the truth.
 
-## ⚠️ Testing Requirement
+## ⚠️ Migration Debugging Philosophy
 
-**Never claim a footer/WeChat fix works without seeing actual WeChat messages.** Code-level analysis and unit tests are not sufficient. Start a test container connected to real WeChat, send messages, and inspect the footer in the actual WeChat client. Only then claim success.
+**Root cause over piecemeal fixes.** When multiple bugs surface after a migration, do NOT fix them one at a time. The only reliable approach is a full three-way diff audit:
+
+1. **Clone official source** for both old and new Hermes versions (`git clone --branch v2026.X.Y`)
+2. **Diff production vs official** for the old version → produces the COMPLETE customization list
+3. **Diff test vs official** for the new version → reveals what was actually migrated
+4. **Cross-reference** — every customization must have a corresponding patch or a documented skip reason
+5. **Check hooks independently** — patches and hooks are separate systems; verify both
+
+This approach was forced by the user after a painful v0.18 migration where piecemeal debugging missed the /continue break, hooks loading failure, and semantic confusion issues. The audit revealed 28 customizations across 3 files; without it, at least 5 issues would have remained hidden.
+
+**When debugging footer/WeChat issues:** Do NOT claim a fix works without seeing actual WeChat messages. Code-level analysis is insufficient. Start a test container connected to real WeChat, send messages, inspect the footer in the actual client.
+
+## Upgrade Resources
+
+- **`CUSTOMIZATIONS.md`**: Complete modification checklist. Maps every custom feature → patch → file → line count. Includes upgrade hazards per patch and a step-by-step upgrade protocol. Read this FIRST when upgrading to a new Hermes version.
+- **`verify-v18.sh`**: Automated verification script. 25+ checks: compilation, class existence, method signatures, metadata flow, footer format. Run after every patch application. `bash verify-v18.sh /opt/hermes/gateway`
+- **`references/v017-full-audit.md`**: Line-level diff methodology used for the v0.17→v0.18 audit. Reusable procedure for any version upgrade.
 
 ## Footer Controls
 
@@ -203,7 +227,7 @@ Complete procedure for running v17 (production) + v18 (test) simultaneously on t
 **Solution: Inline patches instead of hook calls.** Footer and /continue logic must be directly inlined into the weixin.py patches — no `emit_collect()`:
 
 - **Footer (002 patch):** Read `metadata.get("is_system")` and `os.environ.get("HERMES_WECHAT_FOOTER_MODEL_NAME")` directly in `send()` method. No hook round-trip.
-- **/continue (001 patch):** **⚠️ BROKEN.** Current patch only adds a debug log — must be fixed to restore v0.17 pattern: intercept `/continue` in intake, call `_drain_pending(sender_id)`, return early. Never let `/continue` reach the gateway command router.
+- **/continue (001 patch):** Intercepts `/continue` in the intake method before it reaches the gateway. Calls `_drain_pending(sender_id)` to flush queued messages, then returns early. **Must be applied LAST (after 005) because it depends on `_drain_pending()`.** Never lets `/continue` reach the gateway command router.
 - **Hook handler.py:** Only subscribes to `agent:start` and `agent:end` (message queue storage). `command:continue` and `message:send` removed from HOOK.yaml.
 
 **Gateway-level system tagging (003 patch):** To distinguish system messages from model messages at the adapter level, a separate gateway patch tags all system outbound sends with `is_system=True` in metadata. The inline footer logic reads this flag.
@@ -253,15 +277,16 @@ Full three-way diff: official v0.17.0 vs production v0.17, then official v2026.7
 | 25 | **Model-origin thread metadata** | Model name injected into _model_thread_metadata for agent responses |
 | 26 | **Startup ready notification** | `HERMES_WEIXIN_STARTUP_READY_NOTIFY` env var controls gateway ready msg |
 
-### Known Gaps in v0.18 Patched Image (2026-07-07)
+### Known Gaps in v0.18 Patched Image (Resolved 2026-07-07)
 
-| Issue | Status |
-|-------|--------|
-| Patch 001 only adds debug log, no /continue intercept | ❌ |
-| Hooks not loaded (missing `--accept-hooks`) | ❌ |
-| Protocol leak guard intentionally skipped | ⏭️ |
-| Cron badge override intentionally skipped | ⏭️ |
-| Everything else via patches 002-005 | ✅ |
+| Issue | Status | Fix |
+|-------|--------|-----|
+| Patch 001 only adds debug log, no /continue intercept | ✅ Fixed | Rewrote patch 001: intercepts in intake with `_drain_pending()` + `return` |
+| Hooks not loaded (missing `--accept-hooks`) | ✅ Fixed | Added to gateway start command + documented in P1 |
+| Protocol leak guard intentionally skipped | ⏭️ | Optional enhancement |
+| Cron badge override intentionally skipped | ⏭️ | Optional enhancement |
+| Patch ordering was wrong (001→005) | ✅ Fixed | Correct order: 002→003→004→005→001 |
+| Everything else via patches 002-005 | ✅ | Verified compile + feature audit |
 
 See `references/v017-full-audit.md` for line-level diff methodology and complete audit procedure.
 
