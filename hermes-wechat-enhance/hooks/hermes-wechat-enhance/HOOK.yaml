@@ -1,0 +1,5 @@
+name: hermes-wechat-enhance
+description: WeChat enhancement hooks - message capture
+events:
+  - agent:start
+  - agent:end
