@@ -17,7 +17,9 @@ This skill provides Hermes WeChat enhancement artifacts without modifying the pr
 - `patches/004-gateway-model-propagation.patch`: Propagate agent.model→event→metadata.
 - `patches/005-weixin-send-queue.patch`: ReplyBudgetStore + MessageSendQueue + _drain_pending + footer count. **Must be applied AFTER 002.**
 - `CUSTOMIZATIONS.md`: **Complete modification checklist for upgrades.** Maps every custom feature to its patch, file, and line count. Includes upgrade protocol and per-patch hazard notes. Read this first when upgrading to v0.19+.
-- `verify-v18.sh`: **Automated verification script.** 25+ checks: compilation, class existence, method signatures, metadata flow. Run after applying patches.
+- `patches/002-weixin-footer-hook.patch`: optional gateway patch to append the Weixin footer inline from metadata/env.
+- `verify-v18.py`: **Functional verification script** — 63 behavioral checks covering ReplyBudgetStore, MessageSendQueue, `_is_system_meta`, `_footer_model_name`, and /continue control flow. Extracts source via AST, mocks dependencies, and tests actual logic (not just `grep` for existence). Run after every patch regeneration.
+- `CUSTOMIZATIONS.md`: Complete modification checklist for v0.18 → v0.19+ upgrades. Every customization mapped to its patch, with upgrade hazards and protocol.
 - `references/architecture-analysis.md`: Codex research — hook event gaps, source locations, decision log.
 - `references/v017-full-audit.md`: Line-level diff methodology for v0.17→v0.18 audit.
 
