@@ -45,14 +45,11 @@ _resolve_session_agent_runtime()
 def _is_system_meta(meta: dict) -> bool:
     """检查 is_system / actor / source / message_origin / origin"""
 
-def _footer_config_model_name() -> str:
-    """从 config.yaml 读取默认模型（最终兜底）"""
-
 def _footer_model_name(metadata) -> str:
     """完整 fallback 链"""
     if _is_system_meta(metadata): return "hermes"
     return env_var or metadata.model_name or resolved_model or
-           routed_model or metadata.model or config_default or "hermes"
+           routed_model or metadata.model or "hermes"
 ```
 
 ## 验证
