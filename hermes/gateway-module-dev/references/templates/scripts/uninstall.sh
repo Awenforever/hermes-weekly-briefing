@@ -8,6 +8,8 @@ GATEWAY_DIR="${HERMES_GATEWAY_SRC:-${HERMES_GATEWAY_DIR:-/opt/hermes}}"
 HOOKS_DIR="${HERMES_HOOKS_DIR:-$HOME/.hermes/hooks}"
 PRISTINE_TAG="${MODULE_NAME}/pristine"
 INSTALLED_TAG="${MODULE_NAME}/installed"
+INSTALLING_TAG="${MODULE_NAME}/installing"
+FORCE=0
 
 die() { echo "[FAIL] $*" >&2; exit 1; }
 ok() { echo "[OK] $*"; }
@@ -25,21 +27,43 @@ remove_hooks() {
 }
 
 remove_profile_markers() {
-    local profile="${HERMES_PROFILE_RC:-$HOME/.hermes/profiles/default/.bashrc}"
-    [[ -f "$profile" ]] || return 0
-    sed -i.bak "/# ${MODULE_NAME} begin/,/# ${MODULE_NAME} end/d" "$profile"
-    ok "Removed profile markers from $profile"
+    local marker_begin="# ${MODULE_NAME} begin"
+    local marker_end="# ${MODULE_NAME} end"
+    local targets=()
+    [[ -f "${HERMES_CONFIG_FILE:-$HOME/.hermes/config.yaml}" ]] && targets+=("${HERMES_CONFIG_FILE:-$HOME/.hermes/config.yaml}")
+    [[ -f "${HERMES_ENV_FILE:-$HOME/.hermes/.env}" ]] && targets+=("${HERMES_ENV_FILE:-$HOME/.hermes/.env}")
+    local target
+    for target in "${targets[@]}"; do
+        if grep -qF "$marker_begin" "$target"; then
+            sed -i.bak "/$(printf '%s' "$marker_begin" | sed 's/[][\/.^$*]/\\&/g')/,/$(printf '%s' "$marker_end" | sed 's/[][\/.^$*]/\\&/g')/d" "$target"
+            ok "Removed module markers from $target"
+        fi
+    done
+}
+
+parse_args() {
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --force) FORCE=1 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+        shift
+    done
 }
 
 main() {
+    parse_args "$@"
     [[ -d "$GATEWAY_DIR" ]] || die "Gateway directory not found: $GATEWAY_DIR"
     run_git rev-parse -q --verify "refs/tags/$PRISTINE_TAG" >/dev/null || die "Missing pristine tag: $PRISTINE_TAG"
-    run_git rev-parse -q --verify "refs/tags/$INSTALLED_TAG" >/dev/null || die "Module does not appear installed: $INSTALLED_TAG missing"
+    if [[ "$FORCE" -eq 0 ]]; then
+        run_git rev-parse -q --verify "refs/tags/$INSTALLED_TAG" >/dev/null || die "Module does not appear installed: $INSTALLED_TAG missing. Use --force to roll back to $PRISTINE_TAG anyway."
+    fi
 
     run_git reset --hard "$PRISTINE_TAG"
     remove_hooks
     remove_profile_markers
     run_git tag -d "$INSTALLED_TAG" >/dev/null 2>&1 || true
+    run_git tag -d "$INSTALLING_TAG" >/dev/null 2>&1 || true
 
     if [[ -n "$(run_git status --porcelain)" ]]; then
         echo "[WARN] Remaining untracked or local files:"

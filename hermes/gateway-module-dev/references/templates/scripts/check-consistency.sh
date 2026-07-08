@@ -6,6 +6,7 @@ MODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PATCHES_DIR="$MODULE_DIR/patches"
 ERRORS=0
 WARNINGS=0
+STRICT=0
 
 err() { echo "[ERROR] $*"; ERRORS=$((ERRORS + 1)); }
 warn() { echo "[WARN] $*"; WARNINGS=$((WARNINGS + 1)); }
@@ -21,6 +22,7 @@ collect_series_entries() {
 }
 
 check_required_layout() {
+    require_file "$MODULE_DIR/SKILL.md"
     require_file "$MODULE_DIR/CUSTOMIZATIONS.md"
     require_file "$MODULE_DIR/IMPACT_MATRIX.md"
     require_file "$MODULE_DIR/scripts/install.sh"
@@ -28,6 +30,37 @@ check_required_layout() {
     require_file "$MODULE_DIR/scripts/uninstall.sh"
     require_file "$MODULE_DIR/scripts/verify.sh"
     [[ -d "$PATCHES_DIR" ]] || err "Missing patches/ directory"
+}
+
+check_template_placeholders() {
+    local file
+    while IFS= read -r -d '' file; do
+        if grep -Eq 'MODULE_NAME|vX\.Y|001-example\.patch|gateway-module-name|NNN-short-purpose\.patch' "$file"; then
+            err "Template placeholder remains in ${file#$MODULE_DIR/}"
+        fi
+    done < <(find "$MODULE_DIR" -type f \( -name '*.md' -o -name '*.sh' -o -name 'series' \) -print0)
+}
+
+check_verify_implemented() {
+    local verify="$MODULE_DIR/scripts/verify.sh"
+    [[ -f "$verify" ]] || return 0
+    if grep -q 'Template verify_user_visible_goals is not implemented' "$verify"; then
+        err "scripts/verify.sh still contains the template behavior-test failure"
+    fi
+    if awk '
+        /verify_user_visible_goals[[:space:]]*\(\)[[:space:]]*\{/ { in_fn=1; body=""; next }
+        in_fn && /^\}/ {
+            gsub(/[[:space:]]/, "", body)
+            exit (body == "" || body == ":") ? 0 : 1
+        }
+        in_fn && $0 !~ /^[[:space:]]*#/ { body = body $0 }
+        END { if (!in_fn) exit 1 }
+    ' "$verify"; then
+        err "scripts/verify.sh verify_user_visible_goals appears empty"
+    fi
+    if grep -Eq 'Goal: when the module|Example implementation patterns|Do not stop at "function exists"' "$verify"; then
+        err "scripts/verify.sh still contains example comments"
+    fi
 }
 
 check_patch_series() {
@@ -101,7 +134,15 @@ check_docs_reference_patches() {
 }
 
 main() {
+    if [[ "${1:-}" == "--strict" ]]; then
+        STRICT=1
+    elif [[ "${1:-}" != "" ]]; then
+        echo "Usage: $0 [--strict]" >&2
+        exit 64
+    fi
     check_required_layout
+    check_template_placeholders
+    check_verify_implemented
     check_patch_series
     check_orphan_patches
     check_scripts_are_series_driven
@@ -109,8 +150,11 @@ main() {
     check_docs_reference_patches
 
     echo "Consistency check: $ERRORS errors, $WARNINGS warnings"
+    if [[ "$STRICT" -eq 1 && "$WARNINGS" -gt 0 ]]; then
+        echo "[ERROR] Strict mode treats warnings as errors"
+        exit 2
+    fi
     [[ "$ERRORS" -eq 0 ]] || exit 2
-    [[ "$WARNINGS" -eq 0 ]] || exit 1
     ok "Consistency check passed"
 }
 

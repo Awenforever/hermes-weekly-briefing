@@ -1,4 +1,0 @@
-interface:
-  display_name: "Gateway Module Dev"
-  short_description: "Develop Hermes gateway patch modules"
-  default_prompt: "Use $gateway-module-dev to scaffold and maintain a Hermes gateway module with versioned patches and lifecycle scripts."

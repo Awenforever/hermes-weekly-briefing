@@ -1,9 +1,9 @@
 # Existing Blueprint References
 
-This skill abstracts the gateway module paradigm from two reference artifacts:
+This skill abstracts the gateway module paradigm from reference artifacts:
 
-- `/home/vive/Work/Hermes/2026-07-07-gateway-module-blueprint/gateway-module-paradigm.md` on `vive@192.168.125.12`
-- `/opt/data/skills/hermes-wechat-enhance/references/development-blueprint.md`
+- The gateway-module-paradigm.md concept document (originally drafted 2026-07-07)
+- Reference `hermes-wechat-enhance` skill's `development-blueprint.md` for the first concrete application of this paradigm.
 
 Use those references only as case studies. The reusable pattern is:
 

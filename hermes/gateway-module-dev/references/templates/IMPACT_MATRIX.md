@@ -2,7 +2,7 @@
 
 Use this table before and after every gateway module change. A checked column means the file or behavior must be updated or explicitly reviewed.
 
-| Change type | install.sh | update.sh | uninstall.sh | verify.sh | check-consistency.sh | README/SKILL.md | CUSTOMIZATIONS.md |
+| Change type | install.sh | update.sh | uninstall.sh | verify.sh | check-consistency.sh | SKILL.md | CUSTOMIZATIONS.md |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | Add patch | yes | yes | no | yes | yes | yes | yes |
 | Remove patch | yes | yes | yes | yes | yes | yes | yes |

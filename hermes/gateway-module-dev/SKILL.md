@@ -61,17 +61,17 @@ Copy templates from `references/templates/`:
 - `references/templates/CUSTOMIZATIONS.md`
 - `references/templates/IMPACT_MATRIX.md`
 
-After copying, replace `MODULE_NAME`, hook names, and module-specific behavior tests. Keep patch discovery and lifecycle logic `series`-driven.
+After copying, replace `MODULE_NAME`, hook names, and module-specific behavior tests. `verify.sh` must not ship with the template `verify_user_visible_goals`; replace it with behavior tests that exercise the module's user-visible goals. Keep patch discovery and lifecycle logic `series`-driven.
 
 ## Script Rules
 
 Every lifecycle script must be idempotent enough for interrupted installs and explicit enough to fail before damaging source state.
 
-- `install.sh`: detect gateway source directory, detect Hermes version, find `patches/<version>/series`, create the pristine anchor if absent, `git apply --check` each patch before applying it, install hooks, run consistency and behavior verification.
-- `update.sh`: preserve uncommitted local edits with a named stash, return to the pristine anchor, apply the selected version patch set, reinstall hooks, run verification, then attempt stash pop and report conflicts clearly.
-- `uninstall.sh`: require evidence that this module was installed, reset to the pristine anchor, remove hooks and module-owned env/profile markers, then report remaining untracked files without deleting unknown user files.
-- `verify.sh`: compile/import only as a smoke check; primary assertions must be goal-oriented user-visible behavior.
-- `check-consistency.sh`: check that patch directories have `series`, every series entry exists, every patch is referenced by exactly one version series, docs mention current patches, lifecycle scripts use `series` rather than hard-coded patch lists, hooks are paired with install/uninstall handling, and IMPACT_MATRIX exists.
+- `install.sh`: detect gateway source directory, detect Hermes version, find `patches/<version>/series`, create the pristine anchor if absent, `git apply --check` each patch before applying it, install hooks, run consistency and behavior verification. Support `--dry-run` to run only patch checks, and `--force` only for reviewed multi-module or pre-existing-commit cases.
+- `update.sh`: delegate version detection to `install.sh --detect-version`; preserve uncommitted local edits by converting them to a pristine-based stash, return to the pristine anchor, apply the selected version patch set, attempt stash pop, reinstall hooks, and run verification. If stash pop conflicts, print the gateway path, `git status` command, and recovery commands.
+- `uninstall.sh`: require evidence that this module was installed unless `--force` is passed, reset to the pristine anchor, remove hooks and module-owned env/config markers, then report remaining untracked files without deleting unknown user files.
+- `verify.sh`: compile/import only as a smoke check; primary assertions must be goal-oriented user-visible behavior. The template must fail until `verify_user_visible_goals` is replaced.
+- `check-consistency.sh`: check that `SKILL.md`, scripts, docs, and patch directories exist; patch directories have `series`; every series entry exists; every patch is referenced by exactly one version series; docs mention current patches; lifecycle scripts use `series` rather than hard-coded patch lists; hooks are paired with install/uninstall handling; template placeholders are gone; and `verify_user_visible_goals` is not empty. Warnings do not fail by default; pass `--strict` to treat warnings as errors.
 
 ## Git Pristine Workflow
 
@@ -84,7 +84,7 @@ git -C "$GATEWAY_DIR" commit -m "pristine before ${MODULE_NAME}"
 git -C "$GATEWAY_DIR" tag "${MODULE_NAME}/pristine"
 ```
 
-If the gateway repo already exists, do not rewrite its history. If `${MODULE_NAME}/pristine` is absent, create it from the current unmodified gateway state. If the tree is already patched or dirty, stop and ask for an explicit source tree or cleanup instruction.
+If the gateway repo already exists, do not rewrite its history. If `${MODULE_NAME}/pristine` is absent, create it from the current unmodified gateway state. If the repo already has commits, prompt the user to confirm that current HEAD is pristine gateway source; in non-interactive environments require `--force` or `HERMES_ASSUME_PRISTINE=1`. If the tree is already patched or dirty, stop and ask for an explicit source tree or cleanup instruction.
 
 Installed state should be a normal commit:
 
@@ -101,6 +101,8 @@ git -C "$GATEWAY_DIR" reset --hard "${MODULE_NAME}/pristine"
 ```
 
 Never run destructive Git commands outside the resolved gateway source directory. Never reset a user repository unless the module pristine tag exists and the user intended to operate on that gateway tree.
+
+Interrupted installs must be recoverable. `install.sh` writes `${MODULE_NAME}/installing` before patch application and deletes it only after `${MODULE_NAME}/installed` is written. On the next install, if `${MODULE_NAME}/pristine` exists, `${MODULE_NAME}/installed` is absent, and the module patches or installing tag are present, reset hard to pristine before retrying. `uninstall.sh --force` must also reset to pristine and remove hook/profile markers when only the pristine tag exists.
 
 ## Version Detection
 
@@ -142,6 +144,8 @@ Assert _drain_pending exists.
 
 Every `verify.sh` assertion should map to user-visible behavior: command routing, rendered message text, hook side effects, env-controlled behavior, startup notification, queue behavior, error text, or persisted state.
 
+After copying the template `verify.sh`, remove the sample comments and replace `verify_user_visible_goals` with behavior tests for the module. A copied template that still contains `MODULE_NAME`, example comments, or an empty/failing `verify_user_visible_goals` must fail verification and consistency checks.
+
 ## Anti-Sprawl Rules
 
 Apply these on every module change:
@@ -169,3 +173,62 @@ Use the template at `references/templates/IMPACT_MATRIX.md`.
 ## Reference Cases
 
 For context on the origin of this pattern, read `references/existing-blueprints.md`. Treat referenced modules as examples only; do not copy their module-specific patch lists into new modules.
+
+## Multi-Module Conflicts
+
+When multiple gateway modules patch the same source files, install order matters:
+
+1. **Check for existing modules:** before applying, compare `HEAD` to `${MODULE_NAME}/pristine`. Commits after pristine mean another module or manual gateway edits may be present.
+2. **List installed modules:** show `git tag -l '*/installed'` and `git tag -l '*/pristine'` with module names normalized, so the operator can see what is already anchored.
+3. **Patch conflict detection:** run `git apply --check` for every series entry before applying. If checks fail, stop before mutating the tree.
+4. **Default resolution path:** install modules on a clean gateway tree, not stacked. If coexistence is unavoidable, ensure patches modify disjoint file regions and document overlap in `CUSTOMIZATIONS.md`.
+5. **Force path:** `install.sh --force` may continue after the warning, but only after the operator has reviewed the listed modules and likely overlap. Manual conflict resolution should produce a new version-specific patch set instead of editing installed source ad hoc.
+
+## Creating Patches
+
+From zero, create a patch set like this:
+
+```bash
+mkdir -p "$MODULE_DIR/patches/v0.XX"
+cd "$GATEWAY_DIR"
+git reset --hard "${MODULE_NAME}/pristine"
+# edit gateway source for one user-visible responsibility
+git diff > "$MODULE_DIR/patches/v0.XX/001-description.patch"
+printf '%s\n' 001-description.patch > "$MODULE_DIR/patches/v0.XX/series"
+git apply --check "$MODULE_DIR/patches/v0.XX/001-description.patch"
+```
+
+For staged diffs, stage only one responsibility:
+
+```bash
+git add <files>
+git diff --cached > "$MODULE_DIR/patches/v0.XX/001-description.patch"
+```
+
+For commit-oriented patch generation with metadata:
+
+```bash
+git add <files>
+git commit -m "NNN: short purpose"
+git format-patch -1 -o "$MODULE_DIR/patches/v0.XX/"
+```
+
+Rules:
+- Stage ONLY the files belonging to one patch responsibility
+- Use `git diff > patches/v0.XX/001-description.patch` for simple working-tree patches, or `git diff --cached` when you intentionally staged the exact hunk set
+- Keep `patches/v0.XX/series` updated in dependency order, one patch filename per line
+- Verify every patch applies cleanly against pristine: `git reset --hard "${MODULE_NAME}/pristine" && git apply --check path/to/patch`
+- Never generate final patches from an unrelated dirty working tree
+
+## Environment Awareness
+
+`GATEWAY_DIR` defaults differ by deployment:
+
+| Environment | Typical `GATEWAY_DIR` |
+|---|---|
+| Docker (Hermes official) | `/opt/hermes` |
+| Docker (UGREEN NAS) | `/opt/hermes` inside container |
+| Linux/macOS pip install | `~/.hermes/hermes-agent/` or venv site-packages |
+| Git clone | wherever the repo was cloned |
+
+Set `HERMES_GATEWAY_SRC` or `HERMES_GATEWAY_DIR` to override. The install script template defaults to `/opt/hermes` (Docker target). Non-Docker users must set the env var before running install.
