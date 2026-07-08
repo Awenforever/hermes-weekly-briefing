@@ -36,18 +36,18 @@ The script must run without gateway or WeChat dependencies.
 
 | File | Role |
 |------|------|
-| `/opt/data/hooks/hermes-alive/llm_message_composer.py` | Message composition (LLM prompt, sanitize, compose) |
-| `/opt/data/hooks/hermes-alive/proactive_watcher.py` | Main loop, adapter discovery |
-| `/opt/data/hooks/hermes-alive/voice_engine.py` | Personality Genome + social_urge engine |
-| `/opt/data/hooks/hermes-alive/cooldown_manager.py` | Rate limiting + quiet hours |
-| `/opt/data/hooks/hermes-alive/handler.py` | Hook entry point |
+| `hooks/llm_message_composer.py` | Message composition (LLM prompt, sanitize, compose) |
+| `hooks/proactive_watcher.py` | Main loop, adapter discovery |
+| `hooks/voice_engine.py` | Personality Genome + social_urge engine |
+| `hooks/cooldown_manager.py` | Rate limiting + quiet hours |
+| `hooks/handler.py` | Hook entry point |
 | `/opt/data/config.yaml` | Main config (auxiliary.proactive section) |
 | `/opt/data/.env` | Environment variables (PROACTIVE_*) |
 
 ## Never Touch
 
 - `/opt/hermes/` — production gateway source
-- `/home/vive/Work/Hermes/.../hermes-alive/src/hermes_alive/` — project source (uses package imports)
+- local development copies of this skill outside the active skill directory — avoid editing the wrong tree
 - Docker container while running
 
 ## Audit Boundary Rules (防叠甲)
