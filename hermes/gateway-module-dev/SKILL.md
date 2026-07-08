@@ -1,13 +1,33 @@
 ---
 name: gateway-module-dev
-description: Standard Hermes gateway module development workflow for invasive gateway source changes. Use when working on Hermes gateway source modifications, versioned patch sets, install/update/uninstall/verify/check-consistency scripts, hooks, IMPACT_MATRIX.md, CUSTOMIZATIONS.md, or any skill/module that must patch Hermes gateway behavior rather than only add SKILL.md knowledge.
+description: Use when developing gateway modules for Hermes Agent — standardized lifecycle with invasive gateway source changes. Use when working on Hermes gateway source modifications, versioned patch sets, install/update/uninstall/verify/check-consistency scripts, hooks, IMPACT_MATRIX.md, CUSTOMIZATIONS.md, or any skill/module that must patch Hermes gateway behavior rather than only add SKILL.md knowledge.
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+metadata:
+  hermes:
+    tags:
+      - hermes
+      - gateway
+      - patches
+      - lifecycle
+      - modules
+    related_skills:
+      - gateway-audit
+      - gateway-debugging
 ---
 
 # Gateway Module Dev
 
+## Overview
+
 Use this skill to build installable Hermes gateway modules: skills that change gateway source code through versioned patches, install hooks, and provide reversible lifecycle scripts.
 
 Do not encode module-specific behavior in this standard. The module owns its patches and behavioral tests; this skill owns the lifecycle pattern.
+
+## When to Use
+
+Use this skill when a Hermes module must patch gateway source, carry versioned patch sets, install hooks, or provide reversible install/update/uninstall behavior instead of only adding SKILL.md knowledge.
 
 ## Core Paradigm
 
@@ -170,7 +190,7 @@ The matrix must include at least these change types:
 
 Use the template at `references/templates/IMPACT_MATRIX.md`.
 
-## Pitfalls
+## Common Pitfalls
 
 - **pyproject.toml version extraction**: Never use `sed` for extracting the version from `pyproject.toml`. Shell quoting makes the regex fragile — escaped single quotes inside single-quoted sed expressions always break. The template's `install.sh` uses a Python heredoc helper (`_py_extract_version`) with `\x27` (ASCII 39) to avoid all quoting issues.
 
@@ -236,3 +256,10 @@ Rules:
 | Git clone | wherever the repo was cloned |
 
 Set `HERMES_GATEWAY_SRC` or `HERMES_GATEWAY_DIR` to override. The install script template defaults to `/opt/hermes` (Docker target). Non-Docker users must set the env var before running install.
+
+## Verification Checklist
+
+- Frontmatter includes complete skill metadata and Hermes-specific metadata.
+- Lifecycle guidance still preserves the gateway module paradigm and five-script template structure.
+- `references/templates/scripts/install.sh` passes the gateway directory to `_py_extract_version()` correctly.
+- All bash scripts for this skill pass `bash -n`.

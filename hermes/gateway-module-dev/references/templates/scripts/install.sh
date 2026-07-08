@@ -32,7 +32,8 @@ normalize_version() {
 # Uses a quoted heredoc + Python to avoid sed quoting nightmares.
 # \x27 = single quote (ASCII 39), safe inside any quoting.
 _py_extract_version() {
-    python3 << 'PYEOF'
+    local gateway_dir="$1"
+    python3 - "$gateway_dir" << 'PYEOF'
 import sys
 try:
     with open(sys.argv[1] + '/pyproject.toml') as f:
