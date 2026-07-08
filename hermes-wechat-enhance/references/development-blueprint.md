@@ -71,18 +71,9 @@ install.sh 不假定 Docker。WSL/Mac/Linux 用户直接在 gateway 源码目录
 
 ## 3. 开发运维规范
 
-### 3.1 IMPACT_MATRIX — 改了什么该联动改什么
+### 3.1 联动检查
 
-| 改动类型 | install.sh | update.sh | uninstall.sh | verify | README | CUSTOMIZATIONS |
-|----------|:--:|:--:|:--:|:--:|:--:|:--:|
-| 新增 patch | ✅ | ✅ | — | ✅ | ✅ | ✅ |
-| 删除 patch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| patch 重排序 | ✅ | ✅ | — | ✅ | — | ✅ |
-| 新增 hook | ✅ | — | ✅ | — | ✅ | — |
-| 新增 env var | ✅ | — | ✅ | ✅ | ✅ | — |
-| 修改 footer 逻辑 | — | — | — | ✅ | — | ✅ |
-
-`check-consistency.sh` 自动扫描所有脚本的 patch 引用与 patches/ 目录对比，不一致则报错。
+`check-consistency.sh` 自动扫描脚本、文档与 `patches/` 目录的交叉引用，不一致则报错。联动原则保留，由脚本和主文档共同承载。
 
 ### 3.2 测试铁律：Goal-Oriented Only
 
@@ -109,13 +100,12 @@ install.sh 不假定 Docker。WSL/Mac/Linux 用户直接在 gateway 源码目录
 | patches (5个) | ✅ 存在 | 002→003→004→005→001，适配 v0.18 |
 | patch 按版本组织 | ❌ 待做 | 当前 patches/ 目录平铺，未分版本子目录 |
 | CUSTOMIZATIONS.md | ✅ 完成 | 完整修改清单 |
-| SKILL.md | ✅ 存在 | 需加开发规范章节 |
+| SKILL.md | ✅ 存在 | 已补充标准章节与审计修复 |
 | README.md | ⚠️ 需重写 | 需加入 install/update/uninstall 说明 |
-| install.sh | ❌ 待建 | |
-| update.sh | ❌ 待建 | |
-| uninstall.sh | ❌ 待建 | |
-| IMPACT_MATRIX.md | ❌ 待建 | |
-| check-consistency.sh | ❌ 待建 | |
+| install.sh | ✅ 存在 | 版本检测 + git pristine + apply patches + hooks |
+| update.sh | ✅ 存在 | revert 到 pristine 后重放当前 patch 集 |
+| uninstall.sh | ✅ 存在 | git checkout pristine + 清理 hooks |
+| check-consistency.sh | ✅ 存在 | 交叉引用审计脚本 |
 | verify (goal-oriented) | ❌ 待重构 | 当前 63 项检查多是"存在性"，非行为验证 |
 | hooks | ✅ 存在 | hermes-wechat-enhance hook |
 
@@ -134,18 +124,11 @@ install.sh 不假定 Docker。WSL/Mac/Linux 用户直接在 gateway 源码目录
 
 | # | 任务 | 负责人 |
 |:--:|------|:--:|
-| 1 | 更新 SKILL.md — 加开发规范章节 | Codex |
-| 2 | 创建 IMPACT_MATRIX.md | Codex |
-| 3 | 写 check-consistency.sh | Codex |
-| 4 | 重构 patches/ 为版本子目录 (v0.17/, v0.18/) | Codex |
-| 5 | 写 install.sh（版本检测 + git pristine + apply + hooks） | Codex |
-| 6 | 写 update.sh（revert + 新版 apply） | Codex |
-| 7 | 写 uninstall.sh（git checkout pristine + 清理 hooks） | Codex |
-| 8 | 重构 verify 为 goal-oriented 行为测试 | Codex |
-| 9 | 重写 README.md — 包含安装/卸载/升级说明 | Codex |
-| 10 | 审计 Hermes Alive — 补全 _metadata 四字段 + 就绪通知 | Codex |
-| 11 | Hermes Alive 独立化为可安装 skill | Codex |
-| 12 | 更新 hermes-wechat-enhance SKILL.md 的 `related_skills` 指向 hermes-alive | Codex |
+| 1 | 重构 patches/ 为版本子目录 (v0.17/, v0.18/) | Codex |
+| 2 | 重构 verify 为 goal-oriented 行为测试 | Codex |
+| 3 | 重写 README.md — 包含安装/卸载/升级说明 | Codex |
+| 4 | 审计 Hermes Alive — 补全 _metadata 四字段 + 就绪通知 | Codex |
+| 5 | Hermes Alive 独立化为可安装 skill | Codex |
 
 ---
 
@@ -168,7 +151,7 @@ install.sh 不假定 Docker。WSL/Mac/Linux 用户直接在 gateway 源码目录
 |------|------|:--:|
 | Patch 版本子目录 | patches/ 平铺，不便于多版本管理 | P1 |
 | verify 存在性测试 → 行为测试 | 63 项检查中大量是 "类/函数存在?" | P2 |
-| README 过时 | 只列了 2 个 patch，实际有 5 个 | P1 |
+| README 过时 | 安装/卸载/升级说明仍需刷新 | P1 |
 | Hermes Alive 与 wechat-enhance 耦合 | 就绪通知、footer 模型名在两边都有逻辑 | P2 |
 | PYTHONPATH hack | hook 需要 PYTHONPATH 指向 skill 目录才能 import | P3 |
 
