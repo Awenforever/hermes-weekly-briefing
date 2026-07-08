@@ -29,13 +29,30 @@ normalize_version() {
     printf 'v%s\n' "$raw"
 }
 
+# Uses a quoted heredoc + Python to avoid sed quoting nightmares.
+# \x27 = single quote (ASCII 39), safe inside any quoting.
+_py_extract_version() {
+    python3 << 'PYEOF'
+import sys
+try:
+    with open(sys.argv[1] + '/pyproject.toml') as f:
+        for line in f:
+            import re
+            m = re.match(r'^\s*version\s*=\s*["\x27]([^"\x27]*)["\x27]', line)
+            if m:
+                print(m.group(1))
+                break
+except Exception:
+    pass
+PYEOF
+}
+
 detect_version() {
     local raw=""
     if [[ -n "${HERMES_VERSION:-}" ]]; then normalize_version "$HERMES_VERSION" && return 0; fi
     if [[ -f "$GATEWAY_DIR/VERSION" ]]; then normalize_version "$(cat "$GATEWAY_DIR/VERSION")" && return 0; fi
     if [[ -f "$GATEWAY_DIR/pyproject.toml" ]]; then
-        raw="$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$GATEWAY_DIR/pyproject.toml" | head -n1)"
-                [[ -z "$raw" ]] && raw="$(sed -n "/^[[:space:]]*version[[:space:]]*=[[:space:]]*'/s/.*'\([^']*\)'.*/\1/p" "$GATEWAY_DIR/pyproject.toml" | head -n1)"
+        raw="$(_py_extract_version "$GATEWAY_DIR" 2>/dev/null)"
         [[ -n "$raw" ]] && normalize_version "$raw" && return 0
     fi
     raw="$(cd "$GATEWAY_DIR" && python -m hermes --version 2>/dev/null || true)"

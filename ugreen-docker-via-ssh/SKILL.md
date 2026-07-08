@@ -2,7 +2,7 @@
 name: ugreen-docker-via-ssh
 description: |
   Manage Docker containers on UGREEN NAS host from inside the Hermes container 
-  via SSH. Hermes SSH key and docker group membership eliminate the need for sudo.
+  via SSH. All docker commands require sudo. Never use 'docker compose down'.
 category: devops
 ---
 
@@ -13,18 +13,23 @@ Use when Hermes inside a Docker container needs to manage Docker on the UGREEN N
 ## Prerequisites
 - Hermes SSH key at `/opt/data/ssh/hermes_host_ed25519`
 - Host SSH accessible at `vive@192.168.125.12`
-- **User `vive` is in `docker` group** → no sudo needed for Docker commands
+- **Docker commands require `sudo`** — `vive` is NOT in the `docker` group. Always use `sudo -S` with the vive password. For scripted multi-command SSH from inside the container, use paramiko-based Python SSH (see `references/paramiko-ssh-pattern.md`).
+
+> ⚠️ **CRITICAL: NEVER use `docker compose down` to stop containers.**  
+> `down` removes containers — it will delete running AND stopped containers labeled in the project.  
+> Always use `docker stop <name>` to stop and `docker rm <name>` ONLY when explicitly intending to delete.  
+> Before any `down`, always run `docker compose -p <project> down --dry-run` to see what WOULD be removed.
 
 ## SSH Command Pattern
 
 ```bash
 ssh -i /opt/data/ssh/hermes_host_ed25519 -o StrictHostKeyChecking=no vive@192.168.125.12 \
-  '. /etc/profile.d/99-local-proxy.sh 2>/dev/null; docker <command>'
+  'sudo docker <command>'
 ```
 
-- `. /etc/profile.d/99-local-proxy.sh` — needed for non-login SSH sessions; loads HTTP_PROXY/HTTPS_PROXY/NO_PROXY
 - `StrictHostKeyChecking=no` — skip host key prompt
-- No sudo required — `vive` is in `docker` group
+- `sudo` required for all docker commands
+- For multi-command scripts, use paramiko-based Python SSH (see `references/paramiko-ssh-pattern.md`) to handle sudo password prompts programmatically
 
 ## Common Operations
 
@@ -84,6 +89,27 @@ ssh -i /opt/data/ssh/hermes_host_ed25519 -o StrictHostKeyChecking=no vive@192.16
   'docker exec hermes-hermes-1 grep -A5 "pattern" /opt/data/config.yaml'
 ```
 
+## Compose Label Management
+
+### Stripping compose labels from stopped containers
+
+Docker does NOT support modifying labels on existing containers. To remove compose labels without losing the container:
+
+1. Export full config: `docker inspect <name>`
+2. Delete the container: `docker rm <name>`
+3. Recreate with `docker create --name <name>` using the same config but **excluding all `com.docker.compose.*` labels**
+
+Key: use inspect output to reconstruct ALL config (entrypoint, env, volumes, restart, network, user, security_opt, cap_add, labels minus compose-ones, image, cmd). See `references/compose-label-stripping.md` for the full Python script.
+
+After recreation, verify with:
+```bash
+docker compose -p <project> down --dry-run  # should NOT include the stripped containers
+```
+
+### Why this matters
+
+Containers with `com.docker.compose.project=<project>` labels are tracked by compose. `docker compose -p <project> down` will DELETE them even if they're stopped and renamed. Stripping labels protects retired containers from accidental removal. ALWAYS dry-run first.
+
 ## Pitfalls
 - Host DNS hijacks blocked domains to 127.0.0.1 (dnsmasq). Use explicit `--proxy` flag for curl or ensure proxy env is loaded.
 - Docker daemon has its own proxy config (systemd override), so `docker pull` works regardless of shell env.
@@ -91,7 +117,7 @@ ssh -i /opt/data/ssh/hermes_host_ed25519 -o StrictHostKeyChecking=no vive@192.16
 - Non-login SSH sessions don't load `/etc/profile.d/` — always source proxy env explicitly if needed.
 - **`docker restart` ≠ `docker compose restart`**: `docker restart hermes-hermes-1` restarts the container process but `docker compose restart hermes` is the canonical way for compose-managed containers. Both work, but compose is preferred for consistency.
 - **Config changes to auxiliary models** (vision, approval, etc.) require a Hermes restart to take effect — `hermes config set` writes the file but the running process caches config at startup.
-- **700 permission on data directory blocks `vive`**: The Hermes data directory (`/volume2/Hermes-v017-current/`) is mode `700` owned by UID `10000`. The NAS user `vive` cannot read from or write to it directly. When deploying test scripts from inside the container, write them to `/tmp/` on the NAS (via `ssh ... 'cat > /tmp/script.py' < localfile`) instead of into the data directory. Docker commands still work because `vive` is in the `docker` group.
+- **700 permission on data directory blocks `vive`**: The Hermes data directory is mode `700` owned by UID `10000`. The NAS user `vive` cannot read from or write to it directly. When deploying test scripts from inside the container, write them to `/tmp/` on the NAS instead of into the data directory. Docker commands still work with `sudo`.
 
 - **Cross-permission file copy via Docker**: To copy files between a 700-protected directory and a `vive`-accessible directory, use `docker run --rm` with bind mounts (Docker runs as root inside the container, bypassing host file permissions):
   ```bash

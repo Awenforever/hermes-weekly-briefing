@@ -1,0 +1,217 @@
+{
+  "jobs": [
+    {
+      "id": "c333c781d7cc",
+      "name": "research-profile-daily",
+      "prompt": "Run research-profile-evolution in daily mode. Read today's session_search, classify intentions, perform semantic analysis (7 dimensions: thematic threads, depth progression, methodological taste, cross-domain connections, tensions, seed questions), write digest to /opt/data/weekly-briefing/profile/daily/{today}.md",
+      "skills": [
+        "research-profile-engine"
+      ],
+      "skill": "research-profile-engine",
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "55 23 * * *",
+        "display": "55 23 * * *"
+      },
+      "schedule_display": "55 23 * * *",
+      "repeat": {
+        "times": null,
+        "completed": 8
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-06-30T01:47:26.094728+08:00",
+      "next_run_at": "2026-07-08T23:55:00+08:00",
+      "last_run_at": "2026-07-07T23:56:52.235573+08:00",
+      "last_status": "ok",
+      "last_error": null,
+      "last_delivery_error": null,
+      "deliver": "local",
+      "origin": {
+        "platform": "weixin",
+        "chat_id": "o9cq800ipxRzd6B0ooO0zo2DJ-MU@im.wechat",
+        "chat_name": null,
+        "thread_id": null
+      },
+      "fire_claim": null,
+      "last_contract_repair_at": "2026-07-01T18:35:53.969320+00:00",
+      "last_contract_repair_reason": "Reclassified scheduler false-positive: completed=False with valid final_response was previously recorded as RuntimeError."
+    },
+    {
+      "id": "0f2e08c6f9f1",
+      "name": "research-profile-weekly",
+      "prompt": "Run research-profile-evolution in weekly mode. Read last 7 daily digests from /opt/data/weekly-briefing/profile/daily/, identify cross-day patterns, update research profile in memory, write synthesis to /opt/data/weekly-briefing/profile/weekly/{this_week}.md",
+      "skills": [
+        "research-profile-engine"
+      ],
+      "skill": "research-profile-engine",
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 0 * * 0",
+        "display": "30 0 * * 0"
+      },
+      "schedule_display": "30 0 * * 0",
+      "repeat": {
+        "times": null,
+        "completed": 1
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-06-30T01:48:08.527286+08:00",
+      "next_run_at": "2026-07-12T00:30:00+08:00",
+      "last_run_at": "2026-07-05T00:36:52.951253+08:00",
+      "last_status": "ok",
+      "last_error": null,
+      "last_delivery_error": null,
+      "deliver": "local",
+      "origin": {
+        "platform": "weixin",
+        "chat_id": "o9cq800ipxRzd6B0ooO0zo2DJ-MU@im.wechat",
+        "chat_name": null,
+        "thread_id": null
+      },
+      "fire_claim": null
+    },
+    {
+      "id": "0370c08bdf8c",
+      "name": "research-profile-monthly",
+      "prompt": "Run research-profile-evolution in monthly mode. Read all weekly syntheses from /opt/data/weekly-briefing/profile/weekly/ from the past month, perform long-range trajectory analysis (paradigm oscillation, intellectual debt detection, identity shift), rewrite research profile via memory tool, write report to /opt/data/weekly-briefing/profile/monthly/{this_month}.md",
+      "skills": [
+        "research-profile-engine"
+      ],
+      "skill": "research-profile-engine",
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 1 1 * *",
+        "display": "0 1 1 * *"
+      },
+      "schedule_display": "0 1 1 * *",
+      "repeat": {
+        "times": null,
+        "completed": 1
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-06-30T01:48:43.847563+08:00",
+      "next_run_at": "2026-08-01T01:00:00+08:00",
+      "last_run_at": "2026-07-01T01:02:06.044743+08:00",
+      "last_status": "ok",
+      "last_error": null,
+      "last_delivery_error": null,
+      "deliver": "local",
+      "origin": {
+        "platform": "weixin",
+        "chat_id": "o9cq800ipxRzd6B0ooO0zo2DJ-MU@im.wechat",
+        "chat_name": null,
+        "thread_id": null
+      }
+    },
+    {
+      "id": "b6d3a12bddbf",
+      "name": "academic-briefing-maintenance",
+      "prompt": "",
+      "skills": [],
+      "skill": null,
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": "daily_maintenance.py",
+      "no_agent": true,
+      "context_from": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 3 * * *",
+        "display": "0 3 * * *"
+      },
+      "schedule_display": "0 3 * * *",
+      "repeat": {
+        "times": null,
+        "completed": 6
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-07-02T19:43:37.475081+00:00",
+      "next_run_at": "2026-07-09T03:00:00+08:00",
+      "last_run_at": "2026-07-08T03:00:21.370426+08:00",
+      "last_status": "error",
+      "last_error": "Script not found: /opt/data/scripts/daily_maintenance.py",
+      "last_delivery_error": null,
+      "deliver": "local",
+      "origin": {
+        "platform": "weixin",
+        "chat_id": "o9cq800ipxRzd6B0ooO0zo2DJ-MU@im.wechat",
+        "chat_name": null,
+        "thread_id": null
+      },
+      "enabled_toolsets": null,
+      "workdir": null,
+      "fire_claim": null
+    },
+    {
+      "id": "8f1c27e3174d",
+      "name": "weekly-briefing-v2",
+      "prompt": "\u8fd0\u884c unified weekly briefing \u6d41\u7a0b\uff08weekly-briefing-v2 \u6280\u80fd\uff09\u3002\u6b65\u9aa4\uff1a\n1. \u8fd0\u884c python3 /opt/data/weekly-briefing/scripts/run_weekly_e2e.py --discovery-only \u83b7\u53d6\u5019\u9009\u8bba\u6587\n2. \u4ece /opt/data/weekly-briefing/papers/candidates/{week}_selected.json \u8bfb\u53d6\u5165\u9009\u8bba\u6587\n3. \u5bf9\u7167 /opt/data/weekly-briefing/papers/dedup.json \u53bb\u91cd\uff0c\u53ea\u9009\u65b0\u8bba\u6587\uff08\u6700\u591a5\u7bc7\uff09\n4. \u5bf9\u6bcf\u7bc7\u8bba\u6587\u505a\u6df1\u5ea6\u5206\u6790\uff1a\u7528 web_search \u8c03\u7814\u7b2c\u4e00\u4f5c\u8005\u548c\u901a\u8baf\u4f5c\u8005\u80cc\u666f\uff0c\u5224\u65ad\u8bba\u6587\u7c7b\u578b\uff08\u65b9\u6cd5/\u6570\u636e\u96c6/\u7efc\u8ff0/\u5e94\u7528\uff09\uff0c\u7ed9\"\u8bba\u6587\u4e0e\u6211\"\u6807\u7b7e\n5. \u64b0\u5199\u6df1\u5ea6\u5468\u62a5\uff1a\u542b\u672c\u5468\u603b\u4f53\u5224\u65ad\u3001\u9010\u7bc7\u6df1\u5ea6\u5206\u6790\u3001\u6587\u732e\u5b9a\u4f4d\u56de\u987e\u3001\u8de8\u8bba\u6587\u7efc\u5408\uff08\u65b9\u6cd5\u6811+\u5bf9\u6bd4\u8868+\u8d8b\u52bf\uff09\u3001\u6295\u7a3f\u65f6\u95f4\u7ebf\u3001\u4e0b\u5468\u5173\u6ce8\n6. \u7528 Typst \u751f\u6210\u7cbe\u7f8e PDF\uff08\u5b57\u4f53 Noto Sans CJK SC\uff0c\u8272\u5f69\u7cfb\u7edf #1a365d/#2b6cb0\uff09\n7. \u5199\u4e2a\u6027\u5316\u90ae\u4ef6\u6b63\u6587\uff08\u79f0\u547c\uff1a\u5f62\u5bb9\u8bcd+Kelvin J.\uff0c\u5373\u5174\u5bd2\u6684\uff0c\u843d\u6b3e \u5e84\u5955\uff0c\u4e3b\u9898 \u269a \u524d\u7f00\uff09\n8. \u7528 agently-cli \u53d1\u9001\u90ae\u4ef6\u5230 vive@mail.ustc.edu.cn\uff08\u5df2\u8bbe HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1 \u81ea\u52a8\u786e\u8ba4\uff09\n9. \u66f4\u65b0 dedup.json, archive.json, taxonomy.json, relations.json\n10. \u6e05\u7406\uff1a\u4fdd\u7559\u6700\u8fd112\u671fPDF/\u76ee\u5f55\uff0cdedup\u4e2d>26\u5468\u6761\u76ee\u5220\u9664\n\n\u90ae\u4ef6\u4e3b\u9898\u683c\u5f0f\uff1a\u269a \u5b66\u672f\u7814\u7a76\u5468\u62a5 {week} \u2014 {\u4e00\u53e5\u8bdd\u4e3b\u9898\u6982\u62ec}",
+      "skills": [
+        "weekly-briefing-v2"
+      ],
+      "skill": "weekly-briefing-v2",
+      "model": null,
+      "provider": null,
+      "base_url": null,
+      "script": null,
+      "no_agent": false,
+      "context_from": null,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 2 * * 5",
+        "display": "0 2 * * 5"
+      },
+      "schedule_display": "0 2 * * 5",
+      "repeat": {
+        "times": null,
+        "completed": 1
+      },
+      "enabled": true,
+      "state": "scheduled",
+      "paused_at": null,
+      "paused_reason": null,
+      "created_at": "2026-07-03T13:32:06.523001+00:00",
+      "next_run_at": "2026-07-10T02:00:00+00:00",
+      "last_run_at": "2026-07-03T14:45:24.554188+00:00",
+      "last_status": "ok",
+      "last_error": null,
+      "last_delivery_error": null,
+      "deliver": "origin",
+      "origin": {
+        "platform": "weixin",
+        "chat_id": "o9cq800ipxRzd6B0ooO0zo2DJ-MU@im.wechat",
+        "chat_name": null,
+        "thread_id": null
+      },
+      "enabled_toolsets": null,
+      "workdir": null,
+      "fire_claim": null
+    }
+  ],
+  "updated_at": "2026-07-08T03:00:21.371109+08:00"
+}

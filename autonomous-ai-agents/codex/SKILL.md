@@ -189,9 +189,17 @@ terminal(command="gh pr comment 86 --body '<review>'", workdir="~/project")
 
 **This is the #1 user complaint.** Never set `max_iterations`, API call caps, or arbitrary timeouts on Codex calls unless the user explicitly asks. Codex uses OpenAI's own models (gpt-5.4/gpt-5.5) — it does NOT consume Hermes' configured model or API quota. The `delegation.model` and `delegation.provider` config fields in Hermes' config.yaml are for Hermes sub-agents, not for Codex CLI. Codex has its own auth and model selection.
 
-### Codex model is independent from Hermes config
+### Delegation config does NOT affect Codex CLI
 
-Codex CLI authenticates via ChatGPT OAuth or `OPENAI_API_KEY`, not through Hermes' provider config. Setting `delegation.model: deepseek-v4-flash-ascend` or `delegation.provider: ustc` does NOT affect Codex — it only affects Hermes' own `delegate_task` sub-agents. Codex always uses OpenAI models (gpt-5.4, gpt-5.5, o3, etc.) via its own auth.
+Codex CLI authenticates via ChatGPT OAuth or `OPENAI_API_KEY`, not through Hermes' provider config. Setting `delegation.model` or `delegation.provider` in Hermes config.yaml only affects Hermes' own `delegate_task` sub-agents — it does **not** affect Codex. Codex always uses OpenAI models (gpt-5.4, gpt-5.5, o3, etc.) via its own auth.
+
+**To give Codex truly unlimited execution**, set these in Hermes config.yaml:
+```yaml
+delegation:
+  max_iterations: 0       # 0 = unlimited
+  child_timeout_seconds: 0  # 0 = unlimited
+```
+Remove any `delegation.model`, `delegation.provider`, `delegation.base_url`, `delegation.api_key` entries — they only interfere with `delegate_task` sub-agents and are not relevant to Codex CLI.
 
 ### One task at a time, verify before next
 
@@ -213,6 +221,32 @@ mkdir -p /opt/data/.codex && cp /opt/data/home/.codex/auth.json /opt/data/.codex
 mkdir -p /root/.codex && cp /opt/data/home/.codex/auth.json /root/.codex/auth.json
 ```
 Verify with `codex doctor | grep auth`. Should show `auth is configured`.
+
+### Auth lost after Hermes version migration
+
+When Hermes Agent is upgraded (e.g. v0.17→v0.18), the Codex OAuth in `~/.codex/auth.json` lives in the container layer and is lost on rebuild. `codex exec` fails with 401.
+
+**Fix — persistent Docker volume**:
+```bash
+# Once, on NAS:
+docker volume create codex-auth
+docker run --rm -v codex-auth:/data \
+  -v /volume2/Hermes-v017-current/home/.codex:/src:ro \
+  alpine cp -a /src/. /data/
+
+# docker-compose.yaml gateway service:
+volumes:
+  - codex-auth:/opt/data/home/.codex
+
+# Top-level:
+volumes:
+  codex-auth:
+    external: true
+
+# Symlink for root inside container:
+rm -rf /root/.codex && ln -s /opt/data/home/.codex /root/.codex
+```
+After this, Codex auth survives Hermes image rebuilds. No re-login needed.
 
 ### Model restriction with ChatGPT OAuth
 

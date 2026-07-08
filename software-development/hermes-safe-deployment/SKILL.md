@@ -233,6 +233,18 @@ before `git commit`. Without it, `git commit` fails with `fatal: unable to auto-
 
 **Codex CLI prompt escaping.** Codex CLI interprets `&&`, `||`, backticks in prompts as its own arguments. Write logic as Python scripts, then ask Codex to execute the script file. Never inline shell commands in Codex prompts.
 
+## Post-Migration Verification
+
+After migrating to a new container version, verify from inside the container what you can
+before declaring success. See `references/migration-self-check.md` for the full two-tier
+checklist (internal vs host-level) and report format.
+
+**⚠️ WeChat pitfall:** When giving the user commands to copy-paste in a terminal, ALWAYS use
+short single-line commands. Long multi-line commands get mangled by WeChat terminal
+wrapping — the user will copy a broken command and get frustrated. Split into separate
+`docker exec` / `docker inspect` lines. The consolidated Tier 2 block in the reference
+is already formatted for safe copy-paste.
+
 ## NAS Data Migration Pattern
 
 To clone a production data directory on UGREEN NAS without `sudo`:

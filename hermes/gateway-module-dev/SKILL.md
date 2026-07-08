@@ -170,6 +170,10 @@ The matrix must include at least these change types:
 
 Use the template at `references/templates/IMPACT_MATRIX.md`.
 
+## Pitfalls
+
+- **pyproject.toml version extraction**: Never use `sed` for extracting the version from `pyproject.toml`. Shell quoting makes the regex fragile — escaped single quotes inside single-quoted sed expressions always break. The template's `install.sh` uses a Python heredoc helper (`_py_extract_version`) with `\x27` (ASCII 39) to avoid all quoting issues.
+
 ## Reference Cases
 
 For context on the origin of this pattern, read `references/existing-blueprints.md`. Treat referenced modules as examples only; do not copy their module-specific patch lists into new modules.

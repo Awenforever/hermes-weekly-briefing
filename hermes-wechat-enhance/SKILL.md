@@ -140,6 +140,12 @@ This approach was forced by the user after a painful v0.18 migration where piece
 - **`verify-v18.sh`**: Automated verification script. 25+ checks: compilation, class existence, method signatures, metadata flow, footer format. Run after every patch application. `bash verify-v18.sh /opt/hermes/gateway`
 - **`references/v017-full-audit.md`**: Line-level diff methodology used for the v0.17→v0.18 audit. Reusable procedure for any version upgrade.
 
+## WeChat Emoji Convention
+
+WeChat emojis appear in the message stream as `[Name]` brackets — e.g. `[Trick]`, `[Smile]`, `[Facepalm]`. These are NOT feature references, code markers, or command names. Do NOT search for them as if they denote a feature. Recognize them as platform-native emoji tokens.
+
+When responding on WeChat, use emojis naturally (😅 🎉 ✅ ❌ ⚠️ etc.) as they render correctly in the client. The user explicitly encouraged this: "此后你也可以学会用emoji".
+
 ## Footer Controls
 
 The Weixin footer patch reads metadata directly. If `is_system` is True → `hermes`. Otherwise reads from a strict fallback chain:

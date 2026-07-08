@@ -47,6 +47,17 @@ custom_providers:
 - Keep the model IDs exactly as returned by `/v1/models`.
 - For USTC, the endpoint may expose models such as `qwen3.5`, `qwen-chat`, `qwen-reasoner`, `qwen3.6-chat`, `qwen3.6-reasoner`, `glm-chat`, `glm-reasoner`, `glm-5.2`, `deepseek-v4-flash-ascend`, `deepseek-v4-flash-ascend1`, `deepseek-v4-pro`, `smart/default`, and `smart/reasoning`.
 
+## API Pool Health Check
+
+To verify the USTC API pool is actually functional (not just that keys exist in files):
+
+1. Read key from `config.yaml` → `custom_providers[].api_key` (the key Hermes actually uses at runtime)
+2. Read key from `.env` → `USTC_AUGENSTERN_KEY` (secondary, may be stale)
+3. Test both against `GET https://api.llm.ustc.edu.cn/v1/models` with `Authorization: Bearer <key>`
+4. HTTP 200 with model list = healthy; HTTP 401 = key expired/revoked
+
+**The `.env` key and `config.yaml` key can differ.** The `.env` one can go stale while `config.yaml`'s `custom_providers` key remains active. Always test both independently. Do NOT assume the pools match.
+
 ## Verification
 After editing config:
 1. Load the YAML and confirm `custom_providers` is a list.
@@ -60,3 +71,4 @@ After editing config:
 - If the provider is missing from the picker, check whether `custom_providers` was accidentally converted from a YAML list into a dict.
 - If you want multiple USTC models to appear as separate selectable entries in `/model`, create one `custom_providers` entry per model (unique `name`, same `base_url`, same `api_key`). The `models:` sub-dict is for per-model metadata, not for populating the picker.
 - If you need a fresh model list, re-query the live endpoint rather than relying on cached names.
+- **Stale `.env` key trap**: The USTC key in `.env` (`USTC_AUGENSTERN_KEY`) can expire independently from the one in `config.yaml` custom_providers. If `.env` returns 401 but `config.yaml` works, the `.env` key is stale — remove or update it. Never replace the working `config.yaml` key with the broken `.env` key.
