@@ -3,7 +3,7 @@ name: research-profile-engine
 description: 研究画像演化引擎：每日语义分析、每周画像综合、每月轨迹追踪。不负责论文搜索/周报生成/PDF/邮件。
 version: 2.0.0
 related_skills:
-  - academic-weekly-briefing-core
+  - weekly-briefing-v3
 ---
 
 # Research Profile Engine

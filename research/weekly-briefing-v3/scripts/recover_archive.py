@@ -2,7 +2,7 @@
 """Archive recovery: restore archive.json entries from backups and manifests.
 
 Usage:
-    python3 recover_archive.py [--dry-run] [--verbose]
+    DATA_DIR=/path/to/weekly-briefing python3 recover_archive.py [--dry-run] [--verbose]
 
 Recovery sources (in priority order):
     1. recovery/ archive.json.bak snapshots
@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-DATA = Path("/opt/data/weekly-briefing")
+DATA = Path(os.environ.get("DATA_DIR") or os.environ.get("HERMES_WEEKLY_DATA_DIR") or Path.home() / ".hermes" / "weekly-briefing")
 
 def now_iso() -> str:
     return datetime.now().isoformat()

@@ -71,10 +71,8 @@ SSH: `ssh -i /opt/data/ssh/hermes_host_ed25519 vive@192.168.125.12`
 
 ### 周报系统（2026-07-03 更新）
 
-已统一为 `weekly-briefing-v2` 技能 + 以下支撑 skill：
-- `academic-weekly-briefing-core` — 周报核心编排（28步流程、venue quality、relations graph）
-- `academic-report-render-deliver` — PDF渲染+邮件交付（Typst + 3级fallback）
-- `academic-briefing-ops` — 运维（healthcheck、cleanup、recovery）
+已统一为 `weekly-briefing-v3` 单一技能：
+- `weekly-briefing-v3` — 论文发现、质量过滤、深度分析、PDF渲染、邮件交付、archive/dedup/taxonomy/relations 持久化、healthcheck、cleanup、recovery
 - `research-profile-engine` — 研究画像演化（daily/weekly/monthly）
 
 Cron：每周五 10:00 CST，自动确认邮件。E2E runner (`run_weekly_e2e.py`) 负责论文发现，LLM 负责深度分析。

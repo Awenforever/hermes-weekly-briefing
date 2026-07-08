@@ -1,7 +1,7 @@
 # HERMES_WEEKLY_DEPS_BAKED_POLICY_FINAL_V1
 # HERMES_WEEKLY_DEPS_BAKED_POLICY_V2
 #!/usr/bin/env python3
-"""Dependency health check for academic-weekly-briefing system.
+"""Dependency health check for weekly-briefing-v3 system.
 
 Run: python3 health_check.py
 Exit 0 if all healthy, exit 1 if warnings, exit 2 if critical failures.

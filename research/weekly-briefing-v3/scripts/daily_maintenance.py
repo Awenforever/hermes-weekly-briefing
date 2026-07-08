@@ -3,7 +3,7 @@
 """Archive Maintenance: prune, review quality, clean candidates, revalidate relations.
 
 Runs daily via cron. Non-destructive: all pruning suggestions require manual confirmation.
-Output: /opt/data/weekly-briefing/logs/maintenance-YYYY-MM-DD.json
+Output: $DATA_DIR/logs/maintenance-YYYY-MM-DD.json
 """
 
 import json

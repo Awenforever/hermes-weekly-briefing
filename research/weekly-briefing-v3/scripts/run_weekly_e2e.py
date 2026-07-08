@@ -594,7 +594,7 @@ def try_send_email(to: list[str], subject: str, body_file: Path, pdf_file: Path,
             rec["status"] = "confirmation_required"
             rec["error"] = "agently-cli requested confirmation-token"
             auto_confirm_allowed = os.environ.get("HERMES_WEEKLY_EMAIL_AUTO_CONFIRM", "0") == "1"
-            fixed_recipient_ok = to == ["vive@mail.ustc.edu.cn"]
+            fixed_recipient_ok = to == ["your@email.com"]
 
             if auto_confirm_allowed and fixed_recipient_ok and token:
                 confirm_cmd = send_cmd + ["--confirmation-token", token]
