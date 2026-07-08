@@ -264,7 +264,7 @@ New sessions load this SKILL.md via `skill_view()`. All architecture decisions a
 - **Absolute imports only** — hook files loaded flat by `importlib`, no relative imports
 - **Timezone** — set `TZ` to the system timezone or time context will be wrong. `deploy.sh` auto-detects via `timedatectl` / `/etc/timezone` / `/etc/localtime` symlink and appends to `/opt/data/.env` during `setup_env()`. Do NOT hardcode `Asia/Shanghai` — the deploy script handles detection. For weather-aware messages, optionally set `HERMES_PROACTIVE_LAT` and `HERMES_PROACTIVE_LON`.
 - **Gateway restart required** — hook changes only picked up at gateway:startup
-- **Startup notification** — handler.py _startup() sends a "Hermes 已就绪" notification to all connected adapters with home_channel after watcher creation. Metadata: is_system=True, model_name=hermes. Requires HERMES_PROACTIVE_PLATFORM_ENABLED=true for the watcher to start.
+- **Startup notification** — handler.py _startup() sends a "✨ Gateway online — Hermes is back and ready." notification to all connected adapters with home_channel after watcher creation. Metadata: is_system=True, model_name=hermes. Requires HERMES_PROACTIVE_PLATFORM_ENABLED=true for the watcher to start.
 - **Playwright persistence** — Chromium must be on persistent volume (`/opt/data/.playwright-browsers`), Python package reinstalled after image rebuild
 - **Bilibili anti-bot** — needs full browser UA, not the discovery UA
 - **Activity guard vs cooldown** — <30min user activity → hard skip (no message, cooldown NOT advanced). 30min–6h → cosine context decay. >6h → no context.

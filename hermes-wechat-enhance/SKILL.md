@@ -349,7 +349,7 @@ For the gateway to load hooks:
    ln -sfn /opt/data/hooks/hermes-alive ~/.hermes/hooks/hermes-alive
    ```
 
-3. **Startup ready notification** is handled by Hermes Alive handler. On `gateway:startup`, it sends "Hermes Alive ready." via the WeChat adapter. Controlled by env var:
+3. **Startup ready notification** is handled by Hermes Alive handler. On `gateway:startup`, it sends "✨ Gateway online — Hermes is back and ready." via the WeChat adapter. Controlled by env var:
    ```bash
    HERMES_WEIXIN_STARTUP_READY_NOTIFY=1  # default: enabled
    ```

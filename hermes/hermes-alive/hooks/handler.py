@@ -86,7 +86,7 @@ async def _startup(context: dict):
                 if key_value == "weixin":
                     await _adapter.send(
                         weixin_chat_id,
-                        "Hermes 已就绪。",
+                        "✨ Gateway online — Hermes is back and ready.",
                         metadata={"is_system": True, "model_name": "hermes", "model": "hermes", "resolved_model": "hermes", "routed_model": "hermes"},
                     )
                     logger.warning("Hermes Alive: startup ready notification sent to %s", weixin_chat_id)
