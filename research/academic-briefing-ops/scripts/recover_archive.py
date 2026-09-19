@@ -15,7 +15,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-DATA = Path("/opt/data/weekly-briefing")
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+DATA = Path(
+    os.environ.get(
+        "HERMES_WEEKLY_DATA_DIR",
+        str(HERMES_HOME / "plugin-data" / "hermes-weekly-briefing"),
+    )
+).expanduser()
 
 def now_iso() -> str:
     return datetime.now().isoformat()

@@ -11,9 +11,11 @@ import subprocess
 import json
 import sys
 import os
+from pathlib import Path
 
 CHECKS = []
-DATA = os.environ.get("HERMES_WEEKLY_DATA_DIR", os.path.expanduser("~/.hermes/weekly-briefing"))
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+DATA = os.environ.get("HERMES_WEEKLY_DATA_DIR", str(HERMES_HOME / "plugin-data" / "hermes-weekly-briefing"))
 
 def check(name, fn):
     try:
@@ -31,9 +33,8 @@ def run(cmd, timeout=10):
     return r.stdout.strip()
 
 # ─── Critical Dependencies ───
-check("Typst (baked image PATH)", lambda: run("command -v typst && typst --version"))
 check("WeasyPrint", lambda: run("python3 -c 'from weasyprint import HTML; print(\"ok\")'"))
-check("fpdf2", lambda: run("python3 -c 'from fpdf import FPDF; print(\"ok\")'"))
+check("ReportLab fallback", lambda: run("python3 -c 'import reportlab; print(\"ok\")'"))
 check("CJK fonts", lambda: run("fc-list :lang=zh | head -1"))
 check("agently-cli installed", lambda: run("command -v agently-cli >/dev/null 2>&1 && echo ok || echo not_found"))
 
@@ -76,12 +77,6 @@ for fname in ["config.json", "papers/archive.json", "papers/dedup.json", "papers
         json.load(open(p)),
         f"valid ({os.path.getsize(p)} bytes)"
     )[2])
-
-# ─── Typst font check (on actual compile) ───
-check("Typst font compile test", lambda: run(
-    "echo '#set text(font:(\"WenQuanYi Zen Hei\",\"Unifont\")); = Test' | "
-    "typst compile - /tmp/_healthcheck.pdf 2>&1 && echo ok"
-))
 
 # ─── Summary ───
 total = len(CHECKS)

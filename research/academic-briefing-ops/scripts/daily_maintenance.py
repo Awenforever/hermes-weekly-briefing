@@ -3,7 +3,7 @@
 """Archive Maintenance: prune, review quality, clean candidates, revalidate relations.
 
 Runs daily via cron. Non-destructive: all pruning suggestions require manual confirmation.
-Output: /opt/data/weekly-briefing/logs/maintenance-YYYY-MM-DD.json
+Output: $HERMES_WEEKLY_DATA_DIR/logs/maintenance-YYYY-MM-DD.json
 """
 
 import json
@@ -12,8 +12,10 @@ import shutil
 import glob
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 
-DATA = os.environ.get("HERMES_WEEKLY_DATA_DIR", os.path.expanduser("~/.hermes/weekly-briefing"))
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+DATA = os.environ.get("HERMES_WEEKLY_DATA_DIR", str(HERMES_HOME / "plugin-data" / "hermes-weekly-briefing"))
 LOGS = f"{DATA}/logs"
 os.makedirs(LOGS, exist_ok=True)
 
@@ -21,19 +23,12 @@ today = datetime.now().strftime("%Y-%m-%d")
 report = {"date": today, "actions": [], "warnings": [], "suggestions": []}
 
 # ──────────────────────────────────────────────
-# 0. DEPENDENCY POLICY: HERMES_WEEKLY_DEPS_BAKED_POLICY_V2; dependencies are baked into hermes-agent:v0.17.0. No runtime apt-get/init-deps/stage2 hook.
+# 0. DEPENDENCY POLICY: dependencies are declared by the plugin and supplied by the runtime image.
 try:
     __import__("weasyprint")
-    __import__("fpdf")
-except ImportError:
-    rc = 0  # HERMES_WEEKLY_DEPS_BAKED_POLICY_RESIDUAL_CLEAN_V1: runtime apt-get disabled; rebuild hermes-agent:v0.17.0 if dependencies are missing
-    if rc == 0:
-        report["actions"].append("Bootstrap (fallback): reinstalled apt packages")
-    else:
-        report["warnings"].append("Bootstrap (fallback): apt install failed")
-
-if not shutil.which("typst") and not os.path.exists("/usr/local/bin/typst"):
-    report["warnings"].append("Typst not found in PATH or /usr/local/bin/typst")
+    __import__("reportlab")
+except ImportError as exc:
+    report["warnings"].append(f"PDF dependency missing: {exc.name}")
 
 # ──────────────────────────────────────────────
 # 1. CANDIDATE CLEANUP (keep last 12 weeks)
@@ -159,7 +154,7 @@ with open(log_path, "w") as f:
 # Print summary
 print(json.dumps(report, indent=2, ensure_ascii=False))
 
-# Exit with warning if actual errors exist (not just Typst/PATH warnings)
+# Exit with warning if actual errors exist.
 real_errors = [w for w in report.get("warnings", []) if any(k in w.lower() for k in ["corrupt", "missing", "critical", "failed"])]
 if real_errors:
     exit(1)

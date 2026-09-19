@@ -1,105 +1,56 @@
 ---
 name: weekly-briefing-v2
-description: 学术研究周报（统一版）— 论文搜索发现 + 深度分析 + 精美PDF + 个性化邮件。当前唯一生产入口，手动和cron通用。
-version: 2.0.0
+description: 每周发现、分析并通过邮件交付个人研究方向的论文简报。包含作者团队调研、可点击原文链接和中文 PDF。
+version: 4.0.0
 related_skills:
   - academic-weekly-briefing-core
+  - academic-report-render-deliver
 ---
 
-# Weekly Briefing v2 — Active Production Entrypoint
+# Weekly Briefing
 
-**当前唯一运行时入口。** 所有 cron 和手动触发均通过本 skill。
+这是周报的唯一生产入口。手动运行和计划任务都调用 `scripts/run_weekly_e2e.py`。
 
-## 与 academic-weekly-briefing-core 的关系
+## 固定边界
 
-本 skill 负责**执行**（跑 runner、渲染 PDF、发邮件）。以下分析规范由 `academic-weekly-briefing-core` 定义，除非本 skill 显式覆盖：
+- 只通过邮件交付，不生成或发送微信消息。
+- 每期选择 3–5 篇，目标报告长度 6–10 页。
+- 没有逐篇深度分析时，生产交付必须失败；`--allow-shallow` 仅限调试。
+- “下周关注”只写追踪建议，不得自动修改核心研究方向。
+- 历史画像只有在 `research.use_profile_weights=true` 时才影响排序。
+- 反馈只有在 `research.use_user_feedback=true` 且来源明确为用户时才生效。
 
-- **Venue 质量分级**（T1-T4 + Reject）
-- **6 因子综合评分**（venue×0.30 + citation×0.15 + relevance×0.25 + novelty×0.15 + reproducibility×0.10 + author×0.05）
-- **Anti-Bias 护栏**（topic_feedback 权重边界、话题漂移检测、多样性硬约束）
-- **论文类型自适应分析模板**（方法/数据集/综述/理论/应用）
-- **文献关系图谱**（cites/cited_by/extends/contradicts/complements/supersedes）
-- **季度索引与趋势归纳**
-
-在搜索→筛选→分析阶段，遵循 core 的质量控制规则判断论文价值。
-
-## 架构冻结（观察期）
-
-**2026-07-03 起生效，持续 2-3 周至 cron 连续稳定运行。**
-
-刚经历误删 6 个 skill + 恢复后，周报系统进入观察期。硬性约束：
-
-| 允许 | 禁止 |
-|------|------|
-| 修 bug | 合并 skill |
-| 更新 SKILL.md 文档 | 删除任何周报相关 skill |
-| 调整 cron 参数 | 重命名 cron |
-| 数据修复（archive/dedup 等） | 大改入口流程 |
-| | 修改 skill 间职责边界 |
-
-观察期内所有修改先 git commit，再操作。
-
-## 核心原则
-
-- **搜索用直接API**：arXiv API + Crossref API，不走 Hermes web_search（会被block）
-- **分析用LLM**：深度分析、作者调研、跨论文综合、个性化撰写
-- **PDF用Typst**：精美排版，带色彩系统和论文卡片
-- **邮件自动确认**：设 `HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1` 即可无人值守
-- **持续性数据完整更新**：dedup + archive + taxonomy + relations
-
-## 执行流程
-
-**Scripts location:** 所有脚本在本 skill 的 `scripts/` 目录下（`hermes skills install` 会自动拉取）。
-
-## 首次安装初始化
-
-```bash
-# 1. 创建数据目录
-mkdir -p $DATA_DIR/{papers/candidates,reports,profile/daily,profile/weekly,profile/monthly,teams,logs,exports,indices/quarterly}
-
-# 2. 从模板创建配置
-cp {skill_dir}/templates/config.json.template $DATA_DIR/config.json
-cp {skill_dir}/templates/venues.json.template $DATA_DIR/venues.json
-# 编辑 config.json：填好 display_name、research_identity、core_keywords、data_dir
-
-# 3. 依赖检查
-which typst && typst --version
-python3 -c "from weasyprint import HTML; print('OK')"
-fc-list :lang=zh | head -1
-# agently-cli 需单独安装和 OAuth 认证
-```
-
-### 阶段1：论文发现（确定性）
-
-运行E2E runner的发现模式：
+## 执行
 
 ```bash
 python3 {skill_dir}/scripts/run_weekly_e2e.py \
-  --week $(python3 -c "import datetime; y,w,_=datetime.date.today().isocalendar(); print(f'{y}-W{w:02d}')") \
-  --data-dir $DATA_DIR \
-  --discovery-only
+  --week 2026-W38 \
+  --data-dir "$HERMES_WEEKLY_DATA_DIR"
 ```
 
-这会输出 `selected_papers.json` 到 `$DATA_DIR/papers/candidates/{week}_selected.json`。
+需要只验证发现阶段时使用 `--discovery-only`。
 
-### 阶段2-7
+## 内容要求
 
-深度分析→撰写→PDF→邮件→持久化→清理，按 config.json 配置执行。
+每篇论文必须包含：
 
-## 邮件个性化规则
+1. 可点击的 DOI 或 arXiv 原文链接；
+2. 研究问题与重要性；
+3. 方法的分步说明；
+4. 主要证据、对照和局限；
+5. 与本期其他论文的关系；
+6. 作者团队的机构、研究主题、代表性或近期工作及影响力线索。
 
-- **称呼**：按 `config.json` → `user.display_name` 和 `style.role` 设置
-- **落款**：按 `config.json` → `style.signature` 设置
-- **情绪可变化**：按 `style.allow_variable_mood` 控制
-- **主题前缀**：⚚（可在 config.json 中修改）
+跨论文部分使用结构化比较表。不要用模型推测补齐缺失的实验数据、作者履历或引用指标。
 
-## 已知问题与陷阱
+## 数据
 
-- **arXiv API 零结果**：多关键词查询严格，Crossref 通常能补上
-- **agently-cli stderr**：管道操作不要用 `2>&1`，用 `2>/dev/null`
-- **agently-cli --body-file**：必须用相对路径，先 cd 到文件目录
+所有运行数据位于 `HERMES_WEEKLY_DATA_DIR`；在插件模式下默认使用当前 profile 的
+`plugin-data/hermes-weekly-briefing/`。插件升级不得覆盖配置、作者缓存、论文库、报告或投递回执。
 
-## 参考文档
+## 失败处理
 
-- `references/v2-capability-coverage.md` — dry-run 验证
-- `references/agently-cli-pitfalls.md` — 常见陷阱
+- 任一论文缺少深度分析：停止生产交付。
+- PDF 渲染失败：尝试 ReportLab 降级；仍失败则保留 Markdown 并报告错误，不发送残缺附件。
+- 邮件发送失败：保留报告和投递状态，禁止改走微信。
+- 外部作者数据缺失：明确标记缺失，不臆测。

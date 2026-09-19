@@ -1,56 +1,34 @@
 ---
 name: academic-report-render-deliver
-description: 学术报告渲染与交付：Typst PDF 渲染、邮件发送、本地归档。不负责论文搜索/选择/画像演化。
-version: 2.0.0
+description: 将已完成的学术周报渲染为带可点击原文链接的中文 PDF，并仅通过邮件交付。
+version: 4.0.0
 related_skills:
   - academic-weekly-briefing-core
-  - generate-pdf-with-cjk
 ---
 
 # Academic Report Render & Deliver
 
-## 单一职责
+本技能只负责渲染、归档和邮件交付，不负责搜索、筛选、画像学习或微信发送。
 
-渲染和交付：Markdown → 精美 Typst PDF → 邮件（附件）。
+## 渲染要求
 
-**不负责：** 论文搜索、论文选择、画像演化、去重、周报内容逻辑。
+- 首选 WeasyPrint 的 HTML/CSS 渲染。
+- WeasyPrint 不可用时使用 ReportLab，并选择系统中的中文字体。
+- 两种渲染路径都必须保留 DOI/arXiv 超链接。
+- 方法流程使用步骤卡片；跨论文差异使用紧凑比较表；作者信息使用作者卡片。
+- 避免单独一行的标题、被截断表格、不可读的小字和大面积无意义留白。
 
-## 渲染策略（3 级 fallback）
+生成后必须检查：
 
-```
-Typst 首选 → WeasyPrint 后备 → fpdf2 轻量后备 → Markdown-only
-```
-
-## Typst 模板
-
-字体：Noto Sans CJK SC / Noto Serif CJK SC。
-色彩：主色 #1a365d（深蓝），强调色 #2b6cb0（中蓝）。
-
-编译：
-```bash
-cd $DATA_DIR/reports/{week}/
-typst compile report.typ report.pdf
-```
+1. 页数与目标篇幅相符；
+2. 所有页面能正常渲染；
+3. 中文字体无缺字；
+4. 至少每篇论文有一个可点击原文链接；
+5. 深度分析和作者团队内容均已进入 PDF。
 
 ## 邮件交付
 
-- 使用 agently-cli（通过 `command -v agently-cli` 确认安装）
-- 主题前缀：⚚
-- 落款：按 config.json 的 `style.signature` 设置
-- 称呼：按 config.json 的 `user.display_name` 和 `style.role` 设置
-
-### 发送命令（两阶段确认）
-
-```bash
-cd $DATA_DIR/reports/{week}/
-agently-cli message +send \
-  --to "your@email.com" \
-  --subject "⚚ 学术研究周报 {week} — {主题}" \
-  --body-file email_body.txt \
-  --attachment report.pdf
-
-# 第二阶段：确认
-agently-cli message +send ... --confirmation-token {token}
-```
-
-自动确认：设 `HERMES_WEEKLY_EMAIL_AUTO_CONFIRM=1`。
+- 收件人和发送命令来自用户配置。
+- PDF 作为附件，正文只给出本期摘要和论文清单。
+- 发送成功后写入投递回执；失败时保留产物供重试。
+- 不得把周报正文、附件或失败补偿转发到微信。

@@ -1,0 +1,26 @@
+name: hermes-weekly-briefing
+version: 4.0.0
+manifest_version: 1
+api_version: 1
+description: Research discovery, author-team context, polished PDF rendering, and email-only delivery.
+author: Awenforever
+license: MIT
+homepage: https://github.com/Awenforever/hermes-weekly-briefing
+tags: [research, weekly-report, pdf, email]
+requires_hermes: ">=0.21.3,<0.22"
+python_dependencies:
+  - "weasyprint>=62,<70"
+  - "reportlab>=4,<5"
+config_schema:
+  max_selected:
+    type: int
+    default: 5
+    description: Number of papers selected for each report.
+  use_profile_weights:
+    type: bool
+    default: false
+    description: Allow an explicitly maintained research profile to influence discovery.
+  delivery:
+    type: str
+    default: email
+    description: Delivery channel; v4 accepts email only.

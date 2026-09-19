@@ -18,7 +18,7 @@ related_skills:
 
 ## 路径约定
 
-- **DATA_ROOT**: config.json 中配置的 `data_dir`（默认为 `$HERMES_HOME/weekly-briefing/`）
+- **DATA_ROOT**: `HERMES_WEEKLY_DATA_DIR`，插件模式默认为 `$HERMES_HOME/plugin-data/hermes-weekly-briefing/`
 - **SCRIPTS_DIR**: 本 skill 的 `scripts/` 目录（所有脚本随 skill 安装）
 
 ## 维护脚本
@@ -36,8 +36,8 @@ related_skills:
 
 | 依赖 | 检查方式 |
 |------|----------|
-| Typst | `which typst && typst --version` |
 | WeasyPrint | `python3 -c "from weasyprint import HTML"` |
+| ReportLab（降级渲染） | `python3 -c "import reportlab"` |
 | agently-cli | `command -v agently-cli` |
 | CJK 字体 | `fc-list :lang=zh` |
 | pdftotext | `which pdftotext` |

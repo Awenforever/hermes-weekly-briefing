@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import Any
 
 MARKER = "HERMES_WEEKLY_E2E_RUNNER_V1"
-DATA_DIR = Path(os.environ.get("HERMES_WEEKLY_DATA_DIR", str(Path.home() / ".hermes" / "weekly-briefing")))
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+DEFAULT_DATA_DIR = HERMES_HOME / "plugin-data" / "hermes-weekly-briefing"
+DATA_DIR = Path(os.environ.get("HERMES_WEEKLY_DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
 REPORTS_DIR = DATA_DIR / "reports"
 LOGS_DIR = DATA_DIR / "logs"
 PAPERS_DIR = DATA_DIR / "papers"
@@ -238,14 +240,19 @@ def build_queries(config: dict[str, Any], profile: dict[str, Any], feedback: dic
     base = []
     base.extend(config.get("research", {}).get("core_keywords") or [])
     base.extend(["wildfire smoke satellite segmentation", "multispectral smoke detection", "remote sensing fire smoke deep learning"])
+    research_cfg = config.get("research", {}) if isinstance(config, dict) else {}
     weights = profile.get("topic_weights") if isinstance(profile, dict) else None
-    if isinstance(weights, dict):
+    if research_cfg.get("use_profile_weights") is True and isinstance(weights, dict):
         for k, v in sorted(weights.items(), key=lambda kv: -float(kv[1] or 0))[:4]:
             base.append(str(k))
     biases = feedback.get("biases") if isinstance(feedback, dict) else None
-    if isinstance(biases, list):
+    if research_cfg.get("use_user_feedback") is True and isinstance(biases, list):
         for b in biases:
-            if isinstance(b, dict) and str(b.get("direction","")).lower() in ("increase","force_explore","boost"):
+            if (
+                isinstance(b, dict)
+                and str(b.get("source", "")).lower() == "user"
+                and str(b.get("direction","")).lower() in ("increase","force_explore","boost")
+            ):
                 base.append(str(b.get("topic") or b.get("keyword") or ""))
     cleaned = []
     for q in base:
@@ -254,9 +261,125 @@ def build_queries(config: dict[str, Any], profile: dict[str, Any], feedback: dic
             cleaned.append(q)
     return cleaned[:10]
 
-def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], outdir: Path) -> str:
+def source_url(paper: dict[str, Any]) -> str:
+    if paper.get("doi"):
+        return f"https://doi.org/{paper['doi']}"
+    if paper.get("arxiv_id"):
+        return f"https://arxiv.org/abs/{paper['arxiv_id']}"
+    value = str(paper.get("url") or "").strip()
+    return value if value.startswith(("https://", "http://")) else ""
+
+
+def _openalex_json(url: str, cache_path: Path) -> dict[str, Any]:
+    cached = read_json(cache_path, {})
+    if isinstance(cached, dict) and cached.get("cached_at") and isinstance(cached.get("payload"), dict):
+        return cached["payload"]
+    code, _ctype, text = fetch_url(url, timeout=25)
+    if code != 200:
+        return {}
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return {}
+    write_json(cache_path, {"cached_at": now_iso(), "url": url, "payload": payload})
+    return payload if isinstance(payload, dict) else {}
+
+
+def enrich_author_teams(selected: list[dict[str, Any]]) -> None:
+    cache = DATA_DIR / "cache" / "openalex"
+    mailto = str(os.environ.get("OPENALEX_MAILTO") or "").strip()
+    for paper in selected:
+        if paper.get("doi"):
+            work_url = "https://api.openalex.org/works/https://doi.org/" + urllib.parse.quote(str(paper["doi"]), safe="/")
+        else:
+            work_url = "https://api.openalex.org/works?search=" + urllib.parse.quote(str(paper.get("title") or "")) + "&per-page=1"
+        if mailto:
+            work_url += ("&" if "?" in work_url else "?") + "mailto=" + urllib.parse.quote(mailto)
+        key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", canonical_id(paper))[:120]
+        payload = _openalex_json(work_url, cache / f"work-{key}.json")
+        work = payload
+        if isinstance(payload.get("results"), list):
+            work = payload["results"][0] if payload["results"] else {}
+        authors = []
+        institutions = []
+        for authorship in list(work.get("authorships") or [])[:3]:
+            author = authorship.get("author") if isinstance(authorship, dict) else {}
+            author_id = str((author or {}).get("id") or "")
+            profile = {}
+            if author_id:
+                api_id = author_id.rsplit("/", 1)[-1]
+                author_url = f"https://api.openalex.org/authors/{api_id}"
+                if mailto:
+                    author_url += "?mailto=" + urllib.parse.quote(mailto)
+                profile = _openalex_json(author_url, cache / f"author-{api_id}.json")
+                works_url = (
+                    "https://api.openalex.org/works?filter=author.id:"
+                    + urllib.parse.quote(api_id)
+                    + "&sort=publication_date:desc&per-page=3&select=display_name,publication_year,doi,id"
+                )
+                if mailto:
+                    works_url += "&mailto=" + urllib.parse.quote(mailto)
+                works_payload = _openalex_json(works_url, cache / f"author-works-{api_id}.json")
+            else:
+                works_payload = {}
+            affiliations = []
+            for institution in list(authorship.get("institutions") or [])[:3]:
+                name = str((institution or {}).get("display_name") or "").strip()
+                if name and name not in affiliations:
+                    affiliations.append(name)
+                if name and name not in institutions:
+                    institutions.append(name)
+            topics = [str((item or {}).get("display_name") or "") for item in list(profile.get("topics") or [])[:4]]
+            authors.append({
+                "name": str((author or {}).get("display_name") or ""),
+                "openalex": author_id,
+                "affiliations": affiliations,
+                "works_count": profile.get("works_count"),
+                "cited_by_count": profile.get("cited_by_count"),
+                "h_index": (profile.get("summary_stats") or {}).get("h_index") if isinstance(profile.get("summary_stats"), dict) else None,
+                "topics": [topic for topic in topics if topic],
+                "recent_works": [
+                    {
+                        "title": item.get("display_name"),
+                        "year": item.get("publication_year"),
+                        "url": item.get("doi") or item.get("id"),
+                    }
+                    for item in list(works_payload.get("results") or [])[:3]
+                    if isinstance(item, dict)
+                ],
+            })
+        paper["team_profile"] = {
+            "authors": [author for author in authors if author.get("name")],
+            "institutions": institutions,
+            "work_citations": work.get("cited_by_count"),
+            "work_topics": [str((item or {}).get("display_name") or "") for item in list(work.get("topics") or [])[:5]],
+            "evidence_source": str(work.get("id") or ""),
+        }
+
+
+def _paper_analysis(paper: dict[str, Any]) -> dict[str, Any]:
+    value = paper.get("analysis")
+    return value if isinstance(value, dict) else {}
+
+
+def attach_deep_analysis(selected: list[dict[str, Any]], analysis_payload: dict[str, Any]) -> list[str]:
+    records = analysis_payload.get("papers") if isinstance(analysis_payload, dict) else None
+    records = records if isinstance(records, dict) else {}
+    missing = []
+    for paper in selected:
+        analysis = records.get(canonical_id(paper))
+        if not isinstance(analysis, dict):
+            analysis = records.get(str(paper.get("doi") or paper.get("arxiv_id") or ""))
+        if isinstance(analysis, dict):
+            paper["analysis"] = analysis
+        else:
+            missing.append(canonical_id(paper))
+    return missing
+
+
+def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], outdir: Path, queries: list[str]) -> str:
     lines = []
-    lines.append(f"# ⚚ 学术研究周报 {week}")
+    lines.append(f"# 学术研究周报 {week}")
     lines.append("")
     lines.append(f"**生成时间：** {now_iso()}")
     lines.append("")
@@ -268,7 +391,9 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
     if not selected:
         lines.append("- 未入选论文。")
     for i, s in enumerate(selected, 1):
-        lines.append(f"### {i}. {s.get('title', '?')}")
+        link = source_url(s)
+        title = s.get('title', '?')
+        lines.append(f"### {i}. [{title}]({link})" if link else f"### {i}. {title}")
         lines.append(f"- **来源：** {s.get('source', '?')}")
         if s.get("doi"):
             lines.append(f"- **DOI：** [{s['doi']}](https://doi.org/{s['doi']})")
@@ -278,45 +403,234 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
             lines.append(f"- **发表：** {s['published']}")
         if s.get("authors"):
             lines.append(f"- **作者：** {', '.join(s['authors'][:5])}")
+        team = s.get("team_profile") if isinstance(s.get("team_profile"), dict) else {}
+        if team.get("institutions"):
+            lines.append(f"- **作者团队：** {', '.join(team['institutions'][:4])}")
+        if team.get("work_topics"):
+            lines.append(f"- **研究路径：** {' → '.join(team['work_topics'][:4])}")
+        for author in list(team.get("authors") or [])[:3]:
+            metrics = []
+            if author.get("works_count") is not None:
+                metrics.append(f"OpenAlex 收录作品 {author['works_count']}")
+            if author.get("cited_by_count") is not None:
+                metrics.append(f"引用 {author['cited_by_count']}")
+            if author.get("h_index") is not None:
+                metrics.append(f"h-index {author['h_index']}")
+            topic_text = "、".join(author.get("topics") or [])
+            detail = "；".join(metrics + ([f"主要方向：{topic_text}"] if topic_text else []))
+            if detail:
+                lines.append(f"  - **{author.get('name')}：** {detail}")
         if s.get("abstract"):
             lines.append(f"\n{s['abstract'][:500]}")
+        analysis = _paper_analysis(s)
+        if analysis.get("problem"):
+            lines.append(f"\n**研究问题：** {analysis['problem']}")
+        if analysis.get("why_it_matters"):
+            lines.append(f"\n**为什么值得关注：** {analysis['why_it_matters']}")
+        steps = analysis.get("method_steps") if isinstance(analysis.get("method_steps"), list) else []
+        if steps:
+            lines.append("\n**方法链：**")
+            for index, step in enumerate(steps, 1):
+                if isinstance(step, dict):
+                    lines.append(f"{index}. **{step.get('name', '步骤')}** — {step.get('detail', '')}")
+        evidence = analysis.get("evidence") if isinstance(analysis.get("evidence"), list) else []
+        if evidence:
+            lines.append("\n**关键证据：**")
+            lines.extend(f"- {item}" for item in evidence)
+        comparisons = analysis.get("comparison") if isinstance(analysis.get("comparison"), list) else []
+        if comparisons:
+            lines.append("\n**对比：**")
+            for row in comparisons:
+                if isinstance(row, dict):
+                    lines.append(f"- {row.get('dimension', '维度')}：本文 {row.get('paper', '—')}；基线 {row.get('baseline', '—')}")
+        limitations = analysis.get("limitations") if isinstance(analysis.get("limitations"), list) else []
+        if limitations:
+            lines.append("\n**局限与验证点：**")
+            lines.extend(f"- {item}" for item in limitations)
         lines.append("")
+    lines.append("## 持续关注（不会自动漂移）")
+    lines.append("")
+    lines.append("本节仅复述配置中的固定主题与本期检索词；报告正文不会反向改写下周主题。")
+    for query in queries:
+        lines.append(f"- {query}")
+    lines.append("")
+    lines.append("> 作者与团队指标来自 OpenAlex，表示其数据库中的收录与引用情况，不等同于主观排名。")
     return "\n".join(lines)
 
-def make_typst(md: str, out: Path) -> None:
-    lines = []
-    lines.append('#set page(paper: "a4", margin: (top: 2.5cm, bottom: 2cm, left: 2.2cm, right: 2.2cm))')
-    lines.append('#set text(font: ("Noto Sans CJK SC", "Noto Serif CJK SC"), size: 10pt, lang: "zh")')
-    lines.append(md)
-    out.write_text("\n".join(lines), encoding="utf-8")
+def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], queries: list[str], out: Path) -> str:
+    def esc(value: Any) -> str:
+        return html.escape(str(value or ""))
+    papers = []
+    for index, paper in enumerate(selected, 1):
+        url = source_url(paper)
+        title = esc(paper.get("title") or "未命名论文")
+        title_html = f'<a href="{esc(url)}">{title}</a>' if url else title
+        team = paper.get("team_profile") if isinstance(paper.get("team_profile"), dict) else {}
+        analysis = _paper_analysis(paper)
+        author_cards = []
+        for author in list(team.get("authors") or [])[:3]:
+            metrics = []
+            for label, key in (("作品", "works_count"), ("引用", "cited_by_count"), ("h-index", "h_index")):
+                if author.get(key) is not None:
+                    metrics.append(f"{label} {esc(author[key])}")
+            author_cards.append(
+                '<div class="author"><strong>' + esc(author.get("name")) + '</strong><br>'
+                + esc(" · ".join(metrics)) + '<br><span>' + esc(" / ".join(author.get("topics") or [])) + '</span></div>'
+            )
+        method_steps = []
+        for step_index, step in enumerate(list(analysis.get("method_steps") or []), 1):
+            if isinstance(step, dict):
+                method_steps.append(
+                    f'<div class="method-step"><b>{step_index:02d} · {esc(step.get("name") or "步骤")}</b><span>{esc(step.get("detail"))}</span></div>'
+                )
+        comparison_rows = []
+        for row in list(analysis.get("comparison") or []):
+            if isinstance(row, dict):
+                comparison_rows.append(
+                    f'<tr><th>{esc(row.get("dimension"))}</th><td>{esc(row.get("paper"))}</td><td>{esc(row.get("baseline"))}</td></tr>'
+                )
+        evidence_items = ''.join(f'<li>{esc(item)}</li>' for item in list(analysis.get("evidence") or []))
+        limitation_items = ''.join(f'<li>{esc(item)}</li>' for item in list(analysis.get("limitations") or []))
+        analysis_html = f'''
+          <div class="analysis"><h3>研究问题</h3><p>{esc(analysis.get("problem") or "等待深度分析")}</p>
+          <h3>为什么值得关注</h3><p>{esc(analysis.get("why_it_matters") or "等待深度分析")}</p>
+          <h3>方法链</h3><div class="method-tree">{''.join(method_steps) or '<div class="missing">暂无可靠方法拆解</div>'}</div>
+          <h3>关键证据</h3><ul>{evidence_items or '<li>暂无可核验证据摘要</li>'}</ul>
+          {('<h3>与基线对比</h3><table><thead><tr><th>维度</th><th>本文</th><th>基线</th></tr></thead><tbody>' + ''.join(comparison_rows) + '</tbody></table>') if comparison_rows else ''}
+          <h3>局限与验证点</h3><ul>{limitation_items or '<li>需阅读原文后确认</li>'}</ul></div>'''
+        papers.append(f'''<section class="paper">
+          <div class="paper-index">{index:02d}</div><h2>{title_html}</h2>
+          <div class="meta">{esc(paper.get("published"))} · {esc(paper.get("source"))}</div>
+          <p>{esc(str(paper.get("abstract") or "")[:900])}</p>
+          {analysis_html}
+          <div class="team"><h3>作者团队与研究路径</h3>
+            <p><strong>机构：</strong>{esc("、".join(team.get("institutions") or []) or "暂无可靠机构数据")}</p>
+            <p><strong>主题路径：</strong>{esc(" → ".join(team.get("work_topics") or []) or "暂无可靠主题数据")}</p>
+            <div class="author-grid">{''.join(author_cards)}</div>
+          </div>
+          <p class="source"><a href="{esc(url)}">打开论文原文 ↗</a></p>
+        </section>''')
+    stats_html = ''.join(f'<div class="stat"><b>{esc(v)}</b><span>{esc(k)}</span></div>' for k, v in stats.items())
+    queries_html = ''.join(f'<li>{esc(item)}</li>' for item in queries)
+    document = f'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><style>
+      @page {{ size: A4; margin: 18mm 17mm 20mm; @bottom-right {{ content: counter(page) " / " counter(pages); color:#64748b; font-size:8pt; }} }}
+      body {{ font-family: "Noto Sans CJK SC","Microsoft YaHei",sans-serif; color:#172033; font-size:10pt; line-height:1.65; }}
+      a {{ color:#0969a8; text-decoration:none; }} h1 {{ font-size:25pt; margin:0 0 5mm; color:#0f2847; }}
+      h2 {{ font-size:15pt; line-height:1.35; margin:0 0 2mm; }} h3 {{ font-size:10pt; color:#234b70; margin:0 0 2mm; }}
+      .cover {{ min-height:235mm; display:flex; flex-direction:column; justify-content:center; page-break-after:always; }}
+      .eyebrow {{ color:#0b7285; letter-spacing:2px; font-weight:700; }} .subtitle {{ color:#52657a; font-size:12pt; }}
+      .stats {{ display:grid; grid-template-columns:repeat(3,1fr); gap:3mm; margin-top:12mm; }}
+      .stat {{ background:#edf6f8; padding:4mm; border-radius:3mm; }} .stat b {{ display:block; font-size:18pt; color:#0b7285; }} .stat span {{ color:#52657a; font-size:8pt; }}
+      .paper {{ position:relative; page-break-inside:avoid; border-top:1px solid #cbd5e1; padding:7mm 0 5mm 13mm; }}
+      .paper-index {{ position:absolute; left:0; top:7mm; color:#0b7285; font-weight:800; font-size:10pt; }}
+      .meta,.source {{ color:#64748b; font-size:8.5pt; }} .team {{ background:#f6f8fb; border-left:3px solid #4f86a6; padding:4mm; border-radius:1mm; }}
+      .author-grid {{ display:grid; grid-template-columns:repeat(3,1fr); gap:2mm; }} .author {{ background:white; padding:3mm; font-size:8pt; border:1px solid #dce4ea; border-radius:2mm; }}
+      .author span {{ color:#52657a; }} .focus {{ page-break-before:always; }} .note {{ padding:4mm; background:#fff7df; border-radius:2mm; color:#66531c; }}
+      .analysis {{ margin:4mm 0; }} .method-tree {{ display:grid; gap:2mm; margin:2mm 0 4mm; }}
+      .method-step {{ display:grid; grid-template-columns:42mm 1fr; gap:3mm; background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; border-radius:1.5mm; }}
+      .method-step span {{ color:#40566d; }} .missing {{ color:#8a5b00; background:#fff7df; padding:3mm; }}
+      table {{ width:100%; border-collapse:collapse; margin:2mm 0 4mm; font-size:8.5pt; }} th,td {{ border:1px solid #d5dee5; padding:2.5mm; vertical-align:top; }}
+      th {{ background:#eef5f8; text-align:left; color:#234b70; }}
+    </style></head><body>
+      <section class="cover"><div class="eyebrow">HERMES RESEARCH BRIEFING</div><h1>学术研究周报<br>{esc(week)}</h1>
+      <p class="subtitle">论文证据、作者团队与研究路径的一体化阅读稿</p><div class="stats">{stats_html}</div></section>
+      <h1>本期论文</h1>{''.join(papers)}
+      <section class="focus"><h1>持续关注</h1><p class="note">本节只展示固定配置和显式用户反馈形成的检索词。本期报告不会自动改写下周主题，避免关注点自我强化和漂移。</p><ul>{queries_html}</ul>
+      <p class="meta">作者与团队指标来自 OpenAlex，表示数据库收录与引用情况，不等同于主观排名。</p></section>
+    </body></html>'''
+    out.write_text(document, encoding="utf-8")
+    return document
 
-def make_minimal_pdf(md: str, out: Path) -> None:
+
+def make_pdf(html_text: str, md: str, out: Path) -> None:
     try:
-        from fpdf import FPDF
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.add_font("NotoSansCJK", "", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", uni=True)
-        pdf.set_font("NotoSansCJK", "", 10)
-        for line in md.split("\n")[:500]:
-            clean = re.sub(r"[#*`\[\]]+", "", line).strip()[:200]
-            if clean:
-                pdf.multi_cell(0, 5, clean)
-        pdf.output(str(out))
+        from weasyprint import HTML
+        HTML(string=html_text, base_url=str(out.parent)).write_pdf(str(out))
+        return
     except Exception:
         pass
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
+        from xml.sax.saxutils import escape
 
-def split_weixin(text: str, max_chars: int = 1500) -> list[str]:
-    chunks = []
-    cur = ""
-    for line in text.split("\n"):
-        if len(cur) + len(line) + 1 > max_chars and cur.strip():
-            chunks.append(cur.strip())
-            cur = line + "\n"
+        regular_candidates = [
+            Path("C:/Windows/Fonts/msyh.ttc"),
+            Path("C:/Windows/Fonts/simsun.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/System/Library/Fonts/PingFang.ttc"),
+        ]
+        bold_candidates = [
+            Path("C:/Windows/Fonts/msyhbd.ttc"),
+            Path("C:/Windows/Fonts/simhei.ttf"),
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc"),
+        ]
+        regular_path = next((path for path in regular_candidates if path.is_file()), None)
+        bold_path = next((path for path in bold_candidates if path.is_file()), regular_path)
+        if regular_path:
+            pdfmetrics.registerFont(TTFont("HermesCJK", str(regular_path)))
+            pdfmetrics.registerFont(TTFont("HermesCJK-Bold", str(bold_path)))
+            font_name, bold_name = "HermesCJK", "HermesCJK-Bold"
         else:
-            cur += line + "\n"
-    if cur.strip():
-        chunks.append(cur.strip())
-    return chunks
+            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+            font_name = bold_name = "STSong-Light"
+        styles = getSampleStyleSheet()
+        body = ParagraphStyle("ChineseBody", parent=styles["BodyText"], fontName=font_name, fontSize=9.5, leading=15, textColor=colors.HexColor("#172033"))
+        title = ParagraphStyle("ChineseTitle", parent=body, fontName=bold_name, fontSize=22, leading=30, alignment=TA_CENTER, textColor=colors.HexColor("#0f2847"), spaceAfter=12 * mm)
+        heading = ParagraphStyle("ChineseHeading", parent=body, fontName=bold_name, fontSize=14, leading=20, textColor=colors.HexColor("#0b7285"), spaceBefore=5 * mm, spaceAfter=2 * mm)
+        subheading = ParagraphStyle("ChineseSubheading", parent=body, fontName=bold_name, fontSize=11, leading=16, textColor=colors.HexColor("#234b70"), spaceBefore=3 * mm, spaceAfter=1 * mm)
+        note = ParagraphStyle("ChineseNote", parent=body, fontSize=8, leading=12, textColor=colors.HexColor("#64748b"))
+
+        def inline_markup(value: str) -> str:
+            placeholders: list[tuple[str, str, str]] = []
+            def remember(match: re.Match[str]) -> str:
+                token = f"@@LINK{len(placeholders)}@@"
+                placeholders.append((token, match.group(1), match.group(2)))
+                return token
+            value = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", remember, value)
+            value = escape(value.replace("**", "").replace("`", ""))
+            for token, label, url in placeholders:
+                value = value.replace(token, f'<link href="{escape(url)}" color="#0969a8">{escape(label)}</link>')
+            return value
+
+        story = []
+        for raw in md.splitlines():
+            line = raw.strip()
+            if not line:
+                story.append(Spacer(1, 1.5 * mm))
+                continue
+            if line.startswith("# "):
+                if story:
+                    story.append(PageBreak())
+                story.append(Paragraph(inline_markup(line[2:]), title))
+            elif line.startswith("## "):
+                story.append(Paragraph(inline_markup(line[3:]), heading))
+            elif line.startswith("### "):
+                story.append(Paragraph(inline_markup(line[4:]), subheading))
+            elif line.startswith("> "):
+                story.append(Paragraph(inline_markup(line[2:]), note))
+            elif line.startswith("- "):
+                story.append(Paragraph("• " + inline_markup(line[2:]), body))
+            else:
+                story.append(Paragraph(inline_markup(line), body))
+
+        document = SimpleDocTemplate(
+            str(out), pagesize=A4, rightMargin=17 * mm, leftMargin=17 * mm,
+            topMargin=18 * mm, bottomMargin=20 * mm,
+            title="Hermes Academic Weekly Briefing",
+        )
+        document.build(story)
+    except Exception as exc:
+        raise RuntimeError(f"PDF generation failed: {exc}") from exc
 
 def find_agently_cli() -> str | None:
     candidates = [
@@ -396,7 +710,9 @@ def main() -> int:
     ap.add_argument("--send-email", action="store_true")
     ap.add_argument("--max-selected", type=int, default=5)
     ap.add_argument("--discovery-only", action="store_true", help="Stop after paper selection, write selected_papers.json")
-    ap.add_argument("--data-dir", default=None, help=f"Override data directory (default: $HERMES_WEEKLY_DATA_DIR or {Path.home() / '.hermes' / 'weekly-briefing'})")
+    ap.add_argument("--analysis-file", default=None, help="Deep-analysis JSON keyed by canonical paper id")
+    ap.add_argument("--allow-shallow", action="store_true", help="Render without deep analysis (development only)")
+    ap.add_argument("--data-dir", default=None, help=f"Override data directory (default: $HERMES_WEEKLY_DATA_DIR or {DEFAULT_DATA_DIR})")
     args = ap.parse_args()
 
     if args.data_dir:
@@ -519,24 +835,22 @@ def main() -> int:
             print(json.dumps({"ok": True, "mode": "discovery_only", "selected": len(selected), "output": str(discovery_path)}, ensure_ascii=False))
             return 0
 
-        report_md = make_report(week, selected, stats, outdir)
+        analysis_path = Path(args.analysis_file) if args.analysis_file else outdir / "analysis.json"
+        missing_analysis = attach_deep_analysis(selected, read_json(analysis_path, {}))
+        if missing_analysis and not args.allow_shallow:
+            raise RuntimeError(
+                "deep analysis is required before production rendering; missing: "
+                + ", ".join(missing_analysis)
+            )
+        stats["deep_analysis_count"] = len(selected) - len(missing_analysis)
+        enrich_author_teams(selected)
+        report_md = make_report(week, selected, stats, outdir, queries)
         report_md_path = outdir / "report.md"
-        report_typ_path = outdir / "report.typ"
+        report_html_path = outdir / "report.html"
         report_pdf_path = outdir / "report.pdf"
         report_md_path.write_text(report_md, encoding="utf-8")
-        make_typst(report_md, report_typ_path)
-        make_minimal_pdf(report_md, report_pdf_path)
-
-        chunks = split_weixin(report_md, int(read_json(DATA_DIR / "delivery.json", {}).get("weixin", {}).get("max_chars_per_chunk", 1500)))
-        write_json(outdir / "weixin_chunks.json", {
-            "week": week,
-            "generated_at": now_iso(),
-            "max_chars": 1500,
-            "chunk_count": len(chunks),
-            "chunks": chunks,
-            "status": "prepared",
-            "note": "Runner prepares Weixin chunks; actual send should be performed by Hermes gateway/cron wrapper with metadata footer.",
-        })
+        report_html = make_report_html(week, selected, stats, queries, report_html_path)
+        make_pdf(report_html, report_md, report_pdf_path)
 
         email_to = args.email_to or []
         subject = f"⚚ 学术研究周报 {week}"
@@ -551,13 +865,8 @@ def main() -> int:
                 "status": "written",
                 "report_dir": str(outdir),
                 "markdown": str(report_md_path),
-                "typst": str(report_typ_path),
+                "html": str(report_html_path),
                 "pdf": str(report_pdf_path),
-            },
-            "weixin": {
-                "status": "prepared",
-                "chunks_file": str(outdir / "weixin_chunks.json"),
-                "chunk_count": len(chunks),
             },
             "email": email_receipt,
         }
@@ -578,14 +887,12 @@ def main() -> int:
             } for p in selected],
             "outputs": {
                 "markdown": "report.md",
-                "typst": "report.typ",
+                "html": "report.html",
                 "pdf": "report.pdf",
-                "weixin_chunks": "weixin_chunks.json",
                 "delivery_receipt": "delivery_receipt.json",
                 "run_log": str(run_log),
             },
             "delivery": {
-                "weixin": "prepared",
                 "email": email_receipt.get("status"),
             },
         })
