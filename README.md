@@ -33,11 +33,22 @@ hermes plugins enable hermes-weekly-briefing
 查看状态并试运行：
 
 ```bash
+hermes weekly-briefing init --email-to you@example.com --keyword "your research topic"
+hermes weekly-briefing doctor
 hermes weekly-briefing status
 hermes weekly-briefing run
 ```
 
-首次运行前，在插件配置中填写研究关键词、收件地址和发送命令。生产运行缺少深度分析时会停止交付；仅调试时才可显式允许浅层报告。
+`init` 会优先迁移旧版 `weekly-briefing/` 数据；全新安装时则创建当前 profile 的最小生产配置。生产运行缺少深度分析时会停止交付；仅调试时才可显式允许浅层报告。
+
+安装或修复每周计划任务：
+
+```bash
+hermes weekly-briefing schedule-install
+hermes weekly-briefing schedule-status
+```
+
+该命令会把已有的 `weekly-briefing-v2` 任务原位升级为确定性、无 Agent 的邮件任务，清除失效的模型固定项，并把 Hermes 的计划任务输出限制在本地。它不会通过微信投递周报或失败通知。
 
 ## 研究偏好
 

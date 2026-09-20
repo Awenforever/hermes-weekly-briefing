@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 每周发现、分析并通过邮件交付个人研究方向的论文简报。包含作者团队调研、可点击原文链接和中文 PDF。
-version: 4.0.0
+version: 4.1.0
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver

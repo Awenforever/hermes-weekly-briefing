@@ -29,7 +29,7 @@ class ReportRendererTests(unittest.TestCase):
                     "institutions": ["Example Remote Sensing Laboratory", "Example Climate Institute"],
                     "work_topics": ["Remote Sensing", "Wildfire", "Computer Vision"],
                     "authors": [
-                        {"name": "Lin Chen", "works_count": 84, "cited_by_count": 2310, "h_index": 21, "topics": ["Remote Sensing", "Wildfire"]},
+                        {"name": "Lin Chen", "works_count": 84, "cited_by_count": 2310, "h_index": 21, "topics": ["Remote Sensing", "Wildfire"], "openalex": "https://openalex.org/A123", "recent_works": [{"title": "Smoke Transport", "year": "2025", "url": "https://doi.org/10.1000/smoke"}]},
                         {"name": "Mei Wang", "works_count": 52, "cited_by_count": 1190, "h_index": 16, "topics": ["Computer Vision", "Earth Observation"]},
                     ],
                 },
@@ -103,6 +103,9 @@ class ReportRendererTests(unittest.TestCase):
             self.assertTrue(pdf_path.is_file())
             self.assertGreater(pdf_path.stat().st_size, 5000)
             self.assertIn("https://arxiv.org/abs/2609.01234", html_text)
+            self.assertIn("https://openalex.org/A123", html_text)
+            self.assertIn("https://doi.org/10.1000/smoke", html_text)
+            self.assertIn("跨论文方法与证据对比", html_text)
             self.assertNotIn("weixin", html_text.lower())
 
 

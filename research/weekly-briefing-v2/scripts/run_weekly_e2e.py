@@ -20,6 +20,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from weekly_analysis_engine import analyze_papers
+
 MARKER = "HERMES_WEEKLY_E2E_RUNNER_V1"
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
 DEFAULT_DATA_DIR = HERMES_HOME / "plugin-data" / "hermes-weekly-briefing"
@@ -419,7 +425,16 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
             topic_text = "、".join(author.get("topics") or [])
             detail = "；".join(metrics + ([f"主要方向：{topic_text}"] if topic_text else []))
             if detail:
-                lines.append(f"  - **{author.get('name')}：** {detail}")
+                author_name = str(author.get("name") or "作者")
+                author_url = str(author.get("openalex") or "")
+                author_label = f"[{author_name}]({author_url})" if author_url.startswith("http") else author_name
+                lines.append(f"  - **{author_label}：** {detail}")
+            recent = [item for item in list(author.get("recent_works") or [])[:3] if isinstance(item, dict)]
+            for item in recent:
+                recent_url = str(item.get("url") or "")
+                recent_title = str(item.get("title") or "近期论文")
+                label = f"{recent_title} ({item.get('year') or '年份未知'})"
+                lines.append(f"    - [{label}]({recent_url})" if recent_url.startswith("http") else f"    - {label}")
         if s.get("abstract"):
             lines.append(f"\n{s['abstract'][:500]}")
         analysis = _paper_analysis(s)
@@ -448,6 +463,19 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
             lines.append("\n**局限与验证点：**")
             lines.extend(f"- {item}" for item in limitations)
         lines.append("")
+    if selected:
+        lines.append("## 跨论文方法与证据对比")
+        lines.append("")
+        lines.append("| 论文 | 研究问题 | 方法路径 | 关键证据 | 需核验点 |")
+        lines.append("|---|---|---|---|---|")
+        for paper in selected:
+            analysis = _paper_analysis(paper)
+            steps = " → ".join(str(item.get("name") or "步骤") for item in list(analysis.get("method_steps") or []) if isinstance(item, dict))
+            evidence = "；".join(str(item) for item in list(analysis.get("evidence") or [])[:2])
+            limitations = "；".join(str(item) for item in list(analysis.get("limitations") or [])[:2])
+            values = [paper.get("title"), analysis.get("problem"), steps, evidence, limitations]
+            lines.append("| " + " | ".join(str(value or "摘要未说明").replace("|", "／") for value in values) + " |")
+        lines.append("")
     lines.append("## 持续关注（不会自动漂移）")
     lines.append("")
     lines.append("本节仅复述配置中的固定主题与本期检索词；报告正文不会反向改写下周主题。")
@@ -473,9 +501,20 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
             for label, key in (("作品", "works_count"), ("引用", "cited_by_count"), ("h-index", "h_index")):
                 if author.get(key) is not None:
                     metrics.append(f"{label} {esc(author[key])}")
+            author_url = str(author.get("openalex") or "")
+            author_name = esc(author.get("name"))
+            author_heading = f'<a href="{esc(author_url)}"><strong>{author_name}</strong></a>' if author_url.startswith("http") else f'<strong>{author_name}</strong>'
+            recent_links = []
+            for recent in list(author.get("recent_works") or [])[:3]:
+                if not isinstance(recent, dict):
+                    continue
+                recent_url = str(recent.get("url") or "")
+                recent_label = esc(str(recent.get("title") or "近期论文") + " · " + str(recent.get("year") or "年份未知"))
+                recent_links.append(f'<li><a href="{esc(recent_url)}">{recent_label}</a></li>' if recent_url.startswith("http") else f'<li>{recent_label}</li>')
             author_cards.append(
-                '<div class="author"><strong>' + esc(author.get("name")) + '</strong><br>'
-                + esc(" · ".join(metrics)) + '<br><span>' + esc(" / ".join(author.get("topics") or [])) + '</span></div>'
+                '<div class="author">' + author_heading + '<br>'
+                + esc(" · ".join(metrics)) + '<br><span>' + esc(" / ".join(author.get("topics") or [])) + '</span>'
+                + (f'<div class="recent"><b>近期研究</b><ul>{"".join(recent_links)}</ul></div>' if recent_links else '') + '</div>'
             )
         method_steps = []
         for step_index, step in enumerate(list(analysis.get("method_steps") or []), 1):
@@ -510,6 +549,22 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
           </div>
           <p class="source"><a href="{esc(url)}">打开论文原文 ↗</a></p>
         </section>''')
+    synthesis_rows = []
+    method_cards = []
+    for paper in selected:
+        analysis = _paper_analysis(paper)
+        steps = [str(item.get("name") or "步骤") for item in list(analysis.get("method_steps") or []) if isinstance(item, dict)]
+        method_cards.append(f'<div class="synthesis-card"><b>{esc(paper.get("title"))}</b><span>{esc(" → ".join(steps) or "摘要未说明")}</span></div>')
+        synthesis_rows.append(
+            '<tr><th>' + esc(paper.get("title")) + '</th><td>' + esc(analysis.get("problem") or "摘要未说明")
+            + '</td><td>' + esc("；".join(str(x) for x in list(analysis.get("evidence") or [])[:2]) or "摘要未说明")
+            + '</td><td>' + esc("；".join(str(x) for x in list(analysis.get("limitations") or [])[:2]) or "需阅读全文核验") + '</td></tr>'
+        )
+    synthesis_html = (
+        '<section class="synthesis"><h1>跨论文方法与证据对比</h1><div class="synthesis-grid">'
+        + ''.join(method_cards) + '</div><table><thead><tr><th>论文</th><th>研究问题</th><th>关键证据</th><th>需核验点</th></tr></thead><tbody>'
+        + ''.join(synthesis_rows) + '</tbody></table></section>'
+    ) if selected else ''
     stats_html = ''.join(f'<div class="stat"><b>{esc(v)}</b><span>{esc(k)}</span></div>' for k, v in stats.items())
     queries_html = ''.join(f'<li>{esc(item)}</li>' for item in queries)
     document = f'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><style>
@@ -525,7 +580,9 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
       .paper-index {{ position:absolute; left:0; top:7mm; color:#0b7285; font-weight:800; font-size:10pt; }}
       .meta,.source {{ color:#64748b; font-size:8.5pt; }} .team {{ background:#f6f8fb; border-left:3px solid #4f86a6; padding:4mm; border-radius:1mm; }}
       .author-grid {{ display:grid; grid-template-columns:repeat(3,1fr); gap:2mm; }} .author {{ background:white; padding:3mm; font-size:8pt; border:1px solid #dce4ea; border-radius:2mm; }}
-      .author span {{ color:#52657a; }} .focus {{ page-break-before:always; }} .note {{ padding:4mm; background:#fff7df; border-radius:2mm; color:#66531c; }}
+      .author span {{ color:#52657a; }} .author .recent {{ margin-top:2mm; border-top:1px solid #e2e8f0; padding-top:2mm; }} .author .recent ul {{ margin:1mm 0 0; padding-left:4mm; }}
+      .focus,.synthesis {{ page-break-before:always; }} .note {{ padding:4mm; background:#fff7df; border-radius:2mm; color:#66531c; }}
+      .synthesis-grid {{ display:grid; grid-template-columns:repeat(2,1fr); gap:3mm; margin-bottom:5mm; }} .synthesis-card {{ background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; }} .synthesis-card b,.synthesis-card span {{ display:block; }} .synthesis-card span {{ color:#40566d; margin-top:1mm; }}
       .analysis {{ margin:4mm 0; }} .method-tree {{ display:grid; gap:2mm; margin:2mm 0 4mm; }}
       .method-step {{ display:grid; grid-template-columns:42mm 1fr; gap:3mm; background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; border-radius:1.5mm; }}
       .method-step span {{ color:#40566d; }} .missing {{ color:#8a5b00; background:#fff7df; padding:3mm; }}
@@ -534,7 +591,7 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
     </style></head><body>
       <section class="cover"><div class="eyebrow">HERMES RESEARCH BRIEFING</div><h1>学术研究周报<br>{esc(week)}</h1>
       <p class="subtitle">论文证据、作者团队与研究路径的一体化阅读稿</p><div class="stats">{stats_html}</div></section>
-      <h1>本期论文</h1>{''.join(papers)}
+      <h1>本期论文</h1>{''.join(papers)}{synthesis_html}
       <section class="focus"><h1>持续关注</h1><p class="note">本节只展示固定配置和显式用户反馈形成的检索词。本期报告不会自动改写下周主题，避免关注点自我强化和漂移。</p><ul>{queries_html}</ul>
       <p class="meta">作者与团队指标来自 OpenAlex，表示数据库收录与引用情况，不等同于主观排名。</p></section>
     </body></html>'''
@@ -558,7 +615,7 @@ def make_pdf(html_text: str, md: str, out: Path) -> None:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.cidfonts import UnicodeCIDFont
         from reportlab.pdfbase.ttfonts import TTFont
-        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
+        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
         from xml.sax.saxutils import escape
 
         regular_candidates = [
@@ -589,6 +646,17 @@ def make_pdf(html_text: str, md: str, out: Path) -> None:
         heading = ParagraphStyle("ChineseHeading", parent=body, fontName=bold_name, fontSize=14, leading=20, textColor=colors.HexColor("#0b7285"), spaceBefore=5 * mm, spaceAfter=2 * mm)
         subheading = ParagraphStyle("ChineseSubheading", parent=body, fontName=bold_name, fontSize=11, leading=16, textColor=colors.HexColor("#234b70"), spaceBefore=3 * mm, spaceAfter=1 * mm)
         note = ParagraphStyle("ChineseNote", parent=body, fontSize=8, leading=12, textColor=colors.HexColor("#64748b"))
+        method = ParagraphStyle(
+            "MethodCard", parent=body, fontSize=8.5, leading=13,
+            backColor=colors.HexColor("#eef5f8"), borderColor=colors.HexColor("#0b7285"),
+            borderWidth=0.7, borderPadding=7, spaceBefore=1.5 * mm, spaceAfter=1.5 * mm,
+        )
+        section_label = ParagraphStyle(
+            "SectionLabel", parent=body, fontName=bold_name, fontSize=9.5,
+            textColor=colors.HexColor("#234b70"), spaceBefore=2.5 * mm, spaceAfter=1 * mm,
+        )
+        table_cell = ParagraphStyle("TableCell", parent=body, fontSize=7, leading=9)
+        table_head = ParagraphStyle("TableHead", parent=table_cell, fontName=bold_name, textColor=colors.HexColor("#234b70"))
 
         def inline_markup(value: str) -> str:
             placeholders: list[tuple[str, str, str]] = []
@@ -603,12 +671,45 @@ def make_pdf(html_text: str, md: str, out: Path) -> None:
             return value
 
         story = []
-        for raw in md.splitlines():
+        raw_lines = md.splitlines()
+        line_index = 0
+        while line_index < len(raw_lines):
+            raw = raw_lines[line_index]
             line = raw.strip()
+            if line.startswith("|"):
+                table_lines = []
+                while line_index < len(raw_lines) and raw_lines[line_index].strip().startswith("|"):
+                    table_lines.append(raw_lines[line_index].strip())
+                    line_index += 1
+                rows = []
+                for row_index, table_line in enumerate(table_lines):
+                    values = [value.strip() for value in table_line.strip("|").split("|")]
+                    if row_index == 1 and all(re.fullmatch(r":?-{3,}:?", value) for value in values):
+                        continue
+                    style = table_head if not rows else table_cell
+                    rows.append([Paragraph(inline_markup(value), style) for value in values])
+                if rows:
+                    width = 176 * mm
+                    columns = len(rows[0])
+                    if columns == 5:
+                        widths = [35 * mm, 36 * mm, 34 * mm, 36 * mm, 35 * mm]
+                    else:
+                        widths = [width / columns] * columns
+                    table = Table(rows, colWidths=widths, repeatRows=1, hAlign="LEFT")
+                    table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef5f8")),
+                        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d5dee5")),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                        ("TOPPADDING", (0, 0), (-1, -1), 5),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ]))
+                    story.extend([table, Spacer(1, 3 * mm)])
+                continue
             if not line:
                 story.append(Spacer(1, 1.5 * mm))
-                continue
-            if line.startswith("# "):
+            elif line.startswith("# "):
                 if story:
                     story.append(PageBreak())
                 story.append(Paragraph(inline_markup(line[2:]), title))
@@ -620,15 +721,27 @@ def make_pdf(html_text: str, md: str, out: Path) -> None:
                 story.append(Paragraph(inline_markup(line[2:]), note))
             elif line.startswith("- "):
                 story.append(Paragraph("• " + inline_markup(line[2:]), body))
+            elif re.match(r"^\d+\.\s+\*\*", line):
+                story.append(Paragraph(inline_markup(line), method))
+            elif line.startswith("**") and "：**" in line:
+                story.append(Paragraph(inline_markup(line), section_label))
             else:
                 story.append(Paragraph(inline_markup(line), body))
+            line_index += 1
+
+        def page_number(canvas: Any, doc: Any) -> None:
+            canvas.saveState()
+            canvas.setFont(font_name, 7)
+            canvas.setFillColor(colors.HexColor("#64748b"))
+            canvas.drawRightString(A4[0] - 17 * mm, 10 * mm, str(doc.page))
+            canvas.restoreState()
 
         document = SimpleDocTemplate(
             str(out), pagesize=A4, rightMargin=17 * mm, leftMargin=17 * mm,
             topMargin=18 * mm, bottomMargin=20 * mm,
             title="Hermes Academic Weekly Briefing",
         )
-        document.build(story)
+        document.build(story, onFirstPage=page_number, onLaterPages=page_number)
     except Exception as exc:
         raise RuntimeError(f"PDF generation failed: {exc}") from exc
 
@@ -674,22 +787,37 @@ def try_send_email(to: list[str], subject: str, body_path: Path, pdf_path: Path,
     if not cli:
         rec["status"] = "no_agently_cli"
         return rec
+    def redacted(result: dict[str, Any]) -> dict[str, Any]:
+        clean = dict(result)
+        for key in ("stdout", "stderr"):
+            clean[key] = re.sub(
+                r"(?i)(confirmation[_\s]?token[:\s]+)[a-zA-Z0-9_-]+",
+                r"\1[REDACTED]",
+                str(clean.get(key) or ""),
+            )
+        return clean
+
     try:
         cwd = body_path.parent
-        result = run_cmd([cli, "message", "+send", "--to", to[0], "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name], timeout=60, cwd=cwd)
-        rec["send_result"] = result
-        if result.get("ok"):
-            rec["status"] = "sent"
-        else:
-            stderr = result.get("stderr", "")
-            token_match = re.search(r"confirmation[_\s]?token[:\s]+([a-zA-Z0-9_-]+)", stderr)
-            if token_match:
-                token = token_match.group(1)
-                confirm_result = run_cmd([cli, "message", "+send", "--to", to[0], "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name, "--confirmation-token", token], timeout=60, cwd=cwd)
-                rec["confirm_result"] = confirm_result
-                rec["status"] = "sent" if confirm_result.get("ok") else "confirm_failed"
+        deliveries = []
+        for address in to:
+            result = run_cmd([cli, "message", "+send", "--to", address, "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name], timeout=60, cwd=cwd)
+            item: dict[str, Any] = {"to": address, "send_result": redacted(result)}
+            if result.get("ok"):
+                item["status"] = "sent"
             else:
-                rec["status"] = "send_failed"
+                stderr = str(result.get("stderr") or "")
+                token_match = re.search(r"confirmation[_\s]?token[:\s]+([a-zA-Z0-9_-]+)", stderr, flags=re.I)
+                if token_match:
+                    token = token_match.group(1)
+                    confirm_result = run_cmd([cli, "message", "+send", "--to", address, "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name, "--confirmation-token", token], timeout=60, cwd=cwd)
+                    item["confirm_result"] = redacted(confirm_result)
+                    item["status"] = "sent" if confirm_result.get("ok") else "confirm_failed"
+                else:
+                    item["status"] = "send_failed"
+            deliveries.append(item)
+        rec["deliveries"] = deliveries
+        rec["status"] = "sent" if deliveries and all(item["status"] == "sent" for item in deliveries) else "send_failed"
     except Exception as e:
         rec["status"] = "error"
         rec["error"] = str(e)
@@ -836,7 +964,20 @@ def main() -> int:
             return 0
 
         analysis_path = Path(args.analysis_file) if args.analysis_file else outdir / "analysis.json"
-        missing_analysis = attach_deep_analysis(selected, read_json(analysis_path, {}))
+        analysis_payload = read_json(analysis_path, {})
+        analysis_cfg = config.get("analysis") if isinstance(config.get("analysis"), dict) else {}
+        if (
+            selected
+            and not isinstance(analysis_payload.get("papers") if isinstance(analysis_payload, dict) else None, dict)
+            and not args.allow_shallow
+            and analysis_cfg.get("auto", True) is not False
+        ):
+            analysis_input = [{**paper, "canonical_id": canonical_id(paper)} for paper in selected]
+            analysis_payload, provenance = analyze_papers(analysis_input, config, HERMES_HOME)
+            analysis_payload["provenance"] = provenance
+            write_json(analysis_path, analysis_payload)
+            log_event(run_log, type="deep_analysis", **provenance)
+        missing_analysis = attach_deep_analysis(selected, analysis_payload)
         if missing_analysis and not args.allow_shallow:
             raise RuntimeError(
                 "deep analysis is required before production rendering; missing: "
@@ -852,7 +993,11 @@ def main() -> int:
         report_html = make_report_html(week, selected, stats, queries, report_html_path)
         make_pdf(report_html, report_md, report_pdf_path)
 
-        email_to = args.email_to or []
+        delivery_cfg = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
+        if str(delivery_cfg.get("channel") or "email").casefold() != "email":
+            raise RuntimeError("Weekly Briefing supports email delivery only")
+        configured_recipients = delivery_cfg.get("email_to") if isinstance(delivery_cfg.get("email_to"), list) else []
+        email_to = args.email_to or [str(value) for value in configured_recipients if str(value).strip() and "$" not in str(value)]
         subject = f"⚚ 学术研究周报 {week}"
         email_receipt = try_send_email(email_to, subject, report_md_path, report_pdf_path, bool(args.send_email and email_to))
 
@@ -871,6 +1016,12 @@ def main() -> int:
             "email": email_receipt,
         }
         write_json(outdir / "delivery_receipt.json", delivery_receipt)
+
+        if args.send_email and email_receipt.get("status") != "sent":
+            raise RuntimeError(
+                "email delivery required but not completed: "
+                + str(email_receipt.get("status") or "unknown")
+            )
 
         manifest.update({
             "status": "success" if selected else "no_selection",

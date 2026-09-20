@@ -63,5 +63,16 @@
     "allow_variable_mood": true,
     "signature": "$YOUR_SIGNATURE (e.g., YourName or YourAssistantName)",
     "email_subject_prefix": "⚚"
+  },
+  "analysis": {
+    "auto": true,
+    "provider_name": "USTC",
+    "model": "qwen3.6-chat",
+    "timeout_seconds": 180,
+    "max_tokens": 7000
+  },
+  "delivery": {
+    "channel": "email",
+    "email_to": ["$YOUR_EMAIL"]
   }
 }

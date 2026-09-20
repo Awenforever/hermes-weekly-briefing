@@ -1,7 +1,7 @@
 ---
 name: academic-report-render-deliver
 description: 将已完成的学术周报渲染为带可点击原文链接的中文 PDF，并仅通过邮件交付。
-version: 4.0.0
+version: 4.1.0
 related_skills:
   - academic-weekly-briefing-core
 ---
