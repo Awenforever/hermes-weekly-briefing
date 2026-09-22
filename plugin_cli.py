@@ -135,7 +135,7 @@ def _initialize(email_to: list[str], keywords: list[str]) -> int:
             config = {
                 "version": 2,
                 "research": {"core_keywords": clean_keywords, "use_profile_weights": False, "use_user_feedback": False},
-                "analysis": {"auto": True, "provider_name": "USTC", "model": "qwen3.6-chat", "timeout_seconds": 180, "max_tokens": 7000},
+                "analysis": {"auto": True, "provider_name": "USTC", "model": "deepseek-flash", "fallback_model": "qwen3.6-chat", "timeout_seconds": 180, "max_tokens": 7000},
                 "delivery": {"channel": "email", "email_to": clean_emails},
             }
             temporary = config_path.with_suffix(".json.new")

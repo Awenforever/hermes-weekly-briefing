@@ -28,7 +28,8 @@ def _load_hermes_config(path: Path) -> dict[str, Any]:
 def resolve_backend(config: dict[str, Any], hermes_home: Path) -> dict[str, Any]:
     analysis = config.get("analysis") if isinstance(config.get("analysis"), dict) else {}
     provider_name = str(analysis.get("provider_name") or "USTC")
-    model = str(analysis.get("model") or "qwen3.6-chat")
+    model = str(analysis.get("model") or "deepseek-flash")
+    fallback_model = str(analysis.get("fallback_model") or "qwen3.6-chat")
     endpoint = str(analysis.get("endpoint") or "").rstrip("/")
     api_key = ""
     api_key_env = str(analysis.get("api_key_env") or "")
@@ -62,6 +63,7 @@ def resolve_backend(config: dict[str, Any], hermes_home: Path) -> dict[str, Any]
     return {
         "provider_name": provider_name,
         "model": model,
+        "fallback_model": fallback_model,
         "endpoint": endpoint,
         "api_key": api_key,
         "timeout_seconds": int(analysis.get("timeout_seconds") or 180),
@@ -82,6 +84,31 @@ def _json_object(text: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RuntimeError("analysis model returned a non-object")
     return value
+
+
+def _request_analysis(
+    backend: dict[str, Any], model: str, system: str, user: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "temperature": 0,
+        "max_tokens": backend["max_tokens"],
+        "response_format": {"type": "json_object"},
+    }, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        backend["endpoint"] + "/chat/completions",
+        data=body,
+        headers={"Authorization": "Bearer " + backend["api_key"], "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=backend["timeout_seconds"]) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    content = payload["choices"][0]["message"]["content"]
+    result = _json_object(content)
+    if not isinstance(result.get("papers"), dict):
+        raise RuntimeError("analysis JSON is missing papers")
+    return result, payload
 
 
 def analyze_papers(
@@ -122,30 +149,22 @@ def analyze_papers(
         {"task": "逐篇生成可核验深度分析", "output_schema": schema, "papers": items},
         ensure_ascii=False,
     )
-    body = json.dumps({
-        "model": backend["model"],
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "temperature": 0,
-        "max_tokens": backend["max_tokens"],
-        "response_format": {"type": "json_object"},
-    }, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        backend["endpoint"] + "/chat/completions",
-        data=body,
-        headers={"Authorization": "Bearer " + backend["api_key"], "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=backend["timeout_seconds"]) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    content = payload["choices"][0]["message"]["content"]
-    result = _json_object(content)
-    papers_result = result.get("papers")
-    if not isinstance(papers_result, dict):
-        raise RuntimeError("analysis JSON is missing papers")
+    requested_model = backend["model"]
+    fallback_used = False
+    try:
+        result, payload = _request_analysis(backend, requested_model, system, user)
+    except Exception:
+        fallback_model = str(backend.get("fallback_model") or "").strip()
+        if not fallback_model or fallback_model == requested_model:
+            raise
+        result, payload = _request_analysis(backend, fallback_model, system, user)
+        fallback_used = True
     provenance = {
         "provider": backend["provider_name"],
         "requested_model": backend["model"],
-        "actual_model": str(payload.get("model") or backend["model"]),
+        "actual_model": str(payload.get("model") or (backend["fallback_model"] if fallback_used else backend["model"])),
+        "fallback_model": backend["fallback_model"],
+        "fallback_used": fallback_used,
         "paper_count": len(papers),
     }
     return result, provenance
