@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -44,6 +45,8 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     init.add_argument("--email-to", action="append", default=[])
     init.add_argument("--keyword", action="append", default=[])
     actions.add_parser("doctor", help="Validate configuration and delivery readiness")
+    runtime = actions.add_parser("runtime-install", help="Install the declared PDF runtime dependencies")
+    runtime.add_argument("--yes", action="store_true", help="Confirm installation into the active Hermes Python")
     actions.add_parser("mail-status", help="Check Agently CLI installation and login")
     install_mail = actions.add_parser("mail-install", help="Install the supported Agently mail CLI")
     install_mail.add_argument("--yes", action="store_true", help="Confirm the global npm installation")
@@ -218,6 +221,22 @@ def _renderer_status() -> dict:
         except Exception:
             pass
     return {"ready": bool(available), "available": available}
+
+
+def _install_runtime(confirmed: bool) -> int:
+    if not confirmed:
+        print("Refusing to modify the active Python environment without --yes", file=sys.stderr)
+        return 2
+    packages = ["weasyprint>=62,<70", "reportlab>=4,<5"]
+    if importlib.util.find_spec("pip") is not None:
+        command = [sys.executable, "-m", "pip", "install", *packages]
+    else:
+        uv = shutil.which("uv")
+        if not uv:
+            print("Neither pip nor uv is available; install one package manager first", file=sys.stderr)
+            return 2
+        command = _portable_command(uv, "pip", "install", "--python", sys.executable, *packages)
+    return subprocess.run(command).returncode
 
 
 def _profile_timezone() -> str:
@@ -444,6 +463,8 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
         result = _doctor_result()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["ok"] else 2
+    if action == "runtime-install":
+        return _install_runtime(args.yes)
     if action == "mail-status":
         result = _mail_status()
         print(json.dumps(result, ensure_ascii=False, indent=2))

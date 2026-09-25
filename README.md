@@ -75,11 +75,17 @@ Weekly Briefing **只负责生成周报并发送邮件**，不直接向微信发
 通常让 Hermes 操作即可；下面的命令适合排障和自动化：
 
 ```bash
+# 从 GitHub 安装并启用插件
+hermes plugins install Awenforever/hermes-weekly-briefing --enable
+
 # 查看还缺哪些设置
 hermes weekly-briefing setup
 
 # 完整体检：研究配置、模型、PDF 与邮件登录
 hermes weekly-briefing doctor
+
+# 仅在体检提示缺少 PDF 依赖、且你确认后执行
+hermes weekly-briefing runtime-install --yes
 
 # 手动生成；加 --send-email 才会投递
 hermes weekly-briefing run
@@ -99,6 +105,8 @@ hermes weekly-briefing mail-login
 ```
 
 `mail-login` 是交互步骤，可能打开浏览器或要求在当前终端确认。插件不会伪造登录成功；只有身份检查真实通过，计划任务才允许安装。
+
+首次安装启用后，Hermes 会提示重启 gateway 以加载插件。重启后继续运行 `setup` 即可；已完成的信息会被识别，不会从头再问。
 
 ## 数据、升级与恢复
 
