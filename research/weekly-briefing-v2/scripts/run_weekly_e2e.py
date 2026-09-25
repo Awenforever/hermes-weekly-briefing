@@ -99,14 +99,21 @@ def _published_date(c: dict[str, Any]) -> dt.date | None:
 
 
 def direction_verdict(c: dict[str, Any], terms: tuple[str, ...]) -> tuple[bool, str]:
-    """Relevance + recency gate. Returns (admitted, reason)."""
-    blob = " ".join([
-        str(c.get("title") or ""),
-        str(c.get("abstract") or ""),
-        str(c.get("url") or ""),
-    ]).lower()
-    if not any(term in blob for term in terms):
+    """Relevance + recency gate. Returns (admitted, reason).
+
+    A single incidental mention is not enough: with a one-hit rule, 2026-W39 admitted a
+    building-damage mapping paper whose abstract merely said post-event optical imagery
+    "may be unavailable because of cloud, smoke, or darkness". Require a direction term
+    in the title, or two distinct direction terms in the text.
+    """
+    title = str(c.get("title") or "").lower()
+    blob = " ".join([title, str(c.get("abstract") or ""), str(c.get("url") or "")]).lower()
+    title_hits = [t for t in terms if t in title]
+    hits = sorted({t for t in terms if t in blob})
+    if not hits:
         return False, "off_direction"
+    if not title_hits and len(hits) < 2:
+        return False, "off_direction_incidental:" + ",".join(hits[:3])
     published = _published_date(c)
     if published and published.year > dt.date.today().year:
         return False, "future_dated:" + published.isoformat()
@@ -150,13 +157,23 @@ def extract_arxiv_id(text: str) -> str | None:
     m = re.search(r"(?:arxiv\.org/abs/|arxiv:)(\d{4}\.\d{4,5}v?\d*)", text, re.IGNORECASE)
     return m.group(1) if m else None
 
+def strip_arxiv_version(value: str) -> str:
+    """Drop the arXiv revision suffix so v1/v2/v3 dedups against the base identifier.
+
+    Without this, 2026-W39 re-selected 2609.01392v1 (already reported in W36 as
+    2609.01392) and 2601.14475v1 (already reported in W29): dedup.json stored the
+    unversioned key while fresh API hits carry the version, so cross-week dedup missed.
+    """
+    return re.sub(r"v\d+$", "", str(value or "").strip(), flags=re.IGNORECASE)
+
+
 def canonical_id(c: dict[str, Any]) -> str:
     doi = (c.get("doi") or extract_doi(" ".join(str(c.get(k,"")) for k in ("title","url","desc","abstract")))) or ""
     arx = (c.get("arxiv_id") or extract_arxiv_id(" ".join(str(c.get(k,"")) for k in ("title","url","desc","abstract")))) or ""
     if doi:
         return "doi:" + doi.lower()
     if arx:
-        return "arxiv:" + arx.lower()
+        return "arxiv:" + strip_arxiv_version(arx).lower()
     url = str(c.get("url") or "").strip().lower()
     title = re.sub(r"\s+", " ", str(c.get("title") or "")).strip().lower()
     return "url:" + url if url else "title:" + title[:120]
@@ -982,10 +999,13 @@ def main() -> int:
         # Cross-week dedup: exclude papers already seen in dedup.json
         existing_ids = set()
         for raw_key in dedup.get("papers", {}).keys():
-            if not any(raw_key.startswith(p) for p in ("doi:", "arxiv:", "url:", "title:")) and raw_key.startswith("10."):
-                existing_ids.add("doi:" + raw_key)
+            key = str(raw_key)
+            if key.lower().startswith("arxiv:"):
+                existing_ids.add("arxiv:" + strip_arxiv_version(key.split(":", 1)[1]).lower())
+            elif not any(key.startswith(p) for p in ("doi:", "arxiv:", "url:", "title:")) and key.startswith("10."):
+                existing_ids.add("doi:" + key)
             else:
-                existing_ids.add(raw_key)
+                existing_ids.add(key)
         cross_week_deduped = [c for c in candidates if canonical_id(c) not in existing_ids]
         cross_dedup_removed = len(candidates) - len(cross_week_deduped)
         candidates = cross_week_deduped
