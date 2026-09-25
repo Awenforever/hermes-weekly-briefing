@@ -334,9 +334,23 @@ def dedup_candidates(cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 def build_queries(config: dict[str, Any], profile: dict[str, Any], feedback: dict[str, Any]) -> list[str]:
-    base = []
+    # Direction-anchored queries come FIRST and drive the API search. The config keywords
+    # ("deep learning segmentation", "multispectral image analysis", ...) are kept for the
+    # record but are generic: searched on arXiv they return MRI/OCT/6G/agriculture papers,
+    # and the fixed direction then depends on a post-hoc filter. These short, direction-locked
+    # strings were measured against the live API on 2026-09-25 (see w39_widen.py) and each
+    # returns current wildfire/smoke work.
+    base = [
+        "wildfire smoke",
+        "wildfire smoke detection",
+        "wildfire smoke satellite segmentation",
+        "multispectral smoke detection",
+        "wildfire detection satellite imagery",
+        "active fire segmentation",
+        "burned area mapping multispectral",
+        "remote sensing fire smoke deep learning",
+    ]
     base.extend(config.get("research", {}).get("core_keywords") or [])
-    base.extend(["wildfire smoke satellite segmentation", "multispectral smoke detection", "remote sensing fire smoke deep learning"])
     research_cfg = config.get("research", {}) if isinstance(config, dict) else {}
     weights = profile.get("topic_weights") if isinstance(profile, dict) else None
     if research_cfg.get("use_profile_weights") is True and isinstance(weights, dict):
@@ -474,8 +488,9 @@ def attach_deep_analysis(selected: list[dict[str, Any]], analysis_payload: dict[
     return missing
 
 
-def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], outdir: Path, queries: list[str]) -> str:
+def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], outdir: Path, queries: list[str], narrative: dict[str, Any] | None = None) -> str:
     lines = []
+    narrative = narrative if isinstance(narrative, dict) else {}
     lines.append(f"# 学术研究周报 {week}")
     lines.append("")
     lines.append(f"**生成时间：** {now_iso()}")
@@ -484,6 +499,16 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
     for k, v in stats.items():
         lines.append(f"- **{k}：** {v}")
     lines.append("")
+    if narrative.get("discovery_note"):
+        lines.append("## 发现方式说明")
+        lines.append("")
+        lines.append(str(narrative["discovery_note"]))
+        lines.append("")
+    if narrative.get("overview"):
+        lines.append("## 本周总体判断")
+        lines.append("")
+        lines.append(str(narrative["overview"]))
+        lines.append("")
     lines.append("## 入选论文")
     if not selected:
         lines.append("- 未入选论文。")
@@ -567,6 +592,34 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
             values = [paper.get("title"), analysis.get("problem"), steps, evidence, limitations]
             lines.append("| " + " | ".join(str(value or "摘要未说明").replace("|", "／") for value in values) + " |")
         lines.append("")
+    if narrative.get("literature_position"):
+        lines.append("## 文献定位回顾")
+        lines.append("")
+        for item in narrative["literature_position"]:
+            lines.append(f"- {item}")
+        lines.append("")
+    if narrative.get("cross_paper_synthesis"):
+        lines.append("## 跨论文综合")
+        lines.append("")
+        for item in narrative["cross_paper_synthesis"]:
+            lines.append(f"- {item}")
+        lines.append("")
+    timeline = narrative.get("submission_timeline") if isinstance(narrative.get("submission_timeline"), list) else []
+    if timeline:
+        lines.append("## 投稿时间线")
+        lines.append("")
+        lines.append("| 目标 | 时间窗 | 说明 |")
+        lines.append("|---|---|---|")
+        for row in timeline:
+            if isinstance(row, dict):
+                lines.append("| " + " | ".join(str(row.get(key) or "—").replace("|", "／") for key in ("venue", "window", "note")) + " |")
+        lines.append("")
+    if narrative.get("next_week"):
+        lines.append("## 下周关注")
+        lines.append("")
+        for item in narrative["next_week"]:
+            lines.append(f"- {item}")
+        lines.append("")
     lines.append("## 持续关注（不会自动漂移）")
     lines.append("")
     lines.append("本节仅复述配置中的固定主题与本期检索词；报告正文不会反向改写下周主题。")
@@ -576,7 +629,8 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
     lines.append("> 作者与团队指标来自 OpenAlex，表示其数据库中的收录与引用情况，不等同于主观排名。")
     return "\n".join(lines)
 
-def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], queries: list[str], out: Path) -> str:
+def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], queries: list[str], out: Path, narrative: dict[str, Any] | None = None) -> str:
+    narrative = narrative if isinstance(narrative, dict) else {}
     def esc(value: Any) -> str:
         return html.escape(str(value or ""))
     papers = []
@@ -658,6 +712,30 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
     ) if selected else ''
     stats_html = ''.join(f'<div class="stat"><b>{esc(v)}</b><span>{esc(k)}</span></div>' for k, v in stats.items())
     queries_html = ''.join(f'<li>{esc(item)}</li>' for item in queries)
+    overview_html = ''
+    if narrative.get("discovery_note"):
+        overview_html += f'<section class="focus"><h1>发现方式说明</h1><p class="note">{esc(narrative["discovery_note"])}</p></section>'
+    if narrative.get("overview"):
+        overview_html += f'<section class="focus"><h1>本周总体判断</h1><p>{esc(narrative["overview"])}</p></section>'
+    tail_html = ''
+    for key, heading in (("literature_position", "文献定位回顾"), ("cross_paper_synthesis", "跨论文综合")):
+        items = narrative.get(key) if isinstance(narrative.get(key), list) else []
+        if items:
+            body = ''.join(f'<li>{esc(item)}</li>' for item in items)
+            tail_html += f'<section class="focus"><h1>{heading}</h1><ul>{body}</ul></section>'
+    timeline = narrative.get("submission_timeline") if isinstance(narrative.get("submission_timeline"), list) else []
+    if timeline:
+        rows = ''.join(
+            '<tr><th>' + esc(row.get("venue") or "—") + '</th><td>' + esc(row.get("window") or "—")
+            + '</td><td>' + esc(row.get("note") or "—") + '</td></tr>'
+            for row in timeline if isinstance(row, dict)
+        )
+        tail_html += ('<section class="focus"><h1>投稿时间线</h1><table><thead><tr><th>目标</th><th>时间窗</th>'
+                      '<th>说明</th></tr></thead><tbody>' + rows + '</tbody></table></section>')
+    next_week = narrative.get("next_week") if isinstance(narrative.get("next_week"), list) else []
+    if next_week:
+        body = ''.join(f'<li>{esc(item)}</li>' for item in next_week)
+        tail_html += f'<section class="focus"><h1>下周关注</h1><ul>{body}</ul></section>'
     document = f'''<!doctype html><html lang="zh"><head><meta charset="utf-8"><style>
       @page {{ size: A4; margin: 18mm 17mm 20mm; @bottom-right {{ content: counter(page) " / " counter(pages); color:#64748b; font-size:8pt; }} }}
       body {{ font-family: "Noto Sans CJK SC","Microsoft YaHei",sans-serif; color:#172033; font-size:10pt; line-height:1.65; }}
@@ -682,7 +760,8 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
     </style></head><body>
       <section class="cover"><div class="eyebrow">HERMES RESEARCH BRIEFING</div><h1>学术研究周报<br>{esc(week)}</h1>
       <p class="subtitle">论文证据、作者团队与研究路径的一体化阅读稿</p><div class="stats">{stats_html}</div></section>
-      <h1>本期论文</h1>{''.join(papers)}{synthesis_html}
+      {overview_html}
+      <h1>本期论文</h1>{''.join(papers)}{synthesis_html}{tail_html}
       <section class="focus"><h1>持续关注</h1><p class="note">本节只展示固定配置和显式用户反馈形成的检索词。本期报告不会自动改写下周主题，避免关注点自我强化和漂移。</p><ul>{queries_html}</ul>
       <p class="meta">作者与团队指标来自 OpenAlex，表示数据库收录与引用情况，不等同于主观排名。</p></section>
     </body></html>'''
@@ -984,7 +1063,7 @@ def main() -> int:
         # (e.g. 2609.16199 Sentinel-2 active-fire benchmark, 2609.25731 EO wildfire-disturbance
         # embeddings) never entered the pool while the newest four were off-topic. Widen the
         # window; the direction gate and dedup prune what comes back.
-        arxiv = arxiv_search(queries[:8], max_each=15)
+        arxiv = arxiv_search(queries[:10], max_each=15)
         candidates.extend(arxiv)
         log_event(run_log, type="arxiv_api_candidates", count=len(arxiv))
 
@@ -1050,7 +1129,17 @@ def main() -> int:
             c["filter_score"] = score + freshness_bonus(c)
             filtered.append(c)
 
-        filtered.sort(key=lambda x: (x.get("filter_score",0), len(str(x.get("abstract",""))), 1 if x.get("source") != "existing" else 0), reverse=True)
+        # Recency is the tiebreak inside a score band: without it, posts from 2025 with long
+        # abstracts outrank this week's new work on abstract length alone.
+        filtered.sort(
+            key=lambda x: (
+                x.get("filter_score", 0),
+                _published_date(x) or dt.date.min,
+                len(str(x.get("abstract", ""))),
+                1 if x.get("source") != "existing" else 0,
+            ),
+            reverse=True,
+        )
         selected = filtered[: max(1, args.max_selected)]
 
         stats = {
@@ -1116,13 +1205,14 @@ def main() -> int:
                 + ", ".join(missing_analysis)
             )
         stats["deep_analysis_count"] = len(selected) - len(missing_analysis)
+        narrative = analysis_payload.get("narrative") if isinstance(analysis_payload, dict) and isinstance(analysis_payload.get("narrative"), dict) else {}
         enrich_author_teams(selected)
-        report_md = make_report(week, selected, stats, outdir, queries)
+        report_md = make_report(week, selected, stats, outdir, queries, narrative)
         report_md_path = outdir / "report.md"
         report_html_path = outdir / "report.html"
         report_pdf_path = outdir / "report.pdf"
         report_md_path.write_text(report_md, encoding="utf-8")
-        report_html = make_report_html(week, selected, stats, queries, report_html_path)
+        report_html = make_report_html(week, selected, stats, queries, report_html_path, narrative)
         make_pdf(report_html, report_md, report_pdf_path)
 
         delivery_cfg = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
