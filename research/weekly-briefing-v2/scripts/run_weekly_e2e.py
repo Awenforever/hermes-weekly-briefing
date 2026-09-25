@@ -937,7 +937,10 @@ def run_cmd(cmd: list[str], timeout: int = 90, cwd: Path | None = None) -> dict[
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
     }
     try:
-        p = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout, cwd=str(cwd) if cwd else None, env=env)
+        portable_cmd = cmd
+        if os.name == "nt" and cmd and Path(cmd[0]).suffix.casefold() in {".cmd", ".bat"}:
+            portable_cmd = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", *cmd]
+        p = subprocess.run(portable_cmd, text=True, capture_output=True, timeout=timeout, cwd=str(cwd) if cwd else None, env=env)
         return {"ok": p.returncode == 0, "stdout": p.stdout, "stderr": p.stderr, "returncode": p.returncode, "elapsed": round(time.time() - started, 2)}
     except subprocess.TimeoutExpired:
         return {"ok": False, "stdout": "", "stderr": "timeout", "returncode": -1, "elapsed": round(time.time() - started, 2)}
