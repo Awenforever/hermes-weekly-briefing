@@ -49,6 +49,77 @@ NON_ACADEMIC_DOMAINS = {
     "stackoverflow.com", "stackexchange.com", "quora.com", "substack.com",
 }
 
+# --- Fixed research direction guard -------------------------------------------
+# The briefing's scope is wildfire smoke detection/segmentation from satellite and
+# multispectral imagery. Generic query strings such as "deep learning segmentation" or
+# "multispectral image analysis" make arXiv/Crossref return medical, telecom and
+# agriculture papers (MRI stroke, retinal OCT, renal tumours, 6G channels, wheat
+# disease), which then win the score-based selection and drift the report off-direction.
+# Every admitted candidate must therefore carry at least one direction term.
+DEFAULT_DIRECTION_TERMS = (
+    "wildfire", "wild fire", "wildland fire", "forest fire", "bushfire",
+    "brush fire", "peat fire", "smoke", "smouldering", "smoldering",
+    "burned area", "burnt area", "burn scar", "burn severity",
+    "fire detection", "fire segmentation", "active fire", "fire danger",
+    "fire risk", "fire spread", "fire weather", "fire radiative",
+    "pyrocumul", "pyroconvect", "ember", "combustion", "prescribed burn",
+)
+
+# Candidates published after the current year are pipeline artefacts (Crossref
+# "sort=published&order=desc" serves future-dated records) and must never be selected.
+FRESH_WINDOW_DAYS = 180
+
+
+def direction_terms(config: dict[str, Any]) -> tuple[str, ...]:
+    configured = (config.get("research") or {}).get("direction_terms")
+    if isinstance(configured, list):
+        cleaned = tuple(str(t).strip().lower() for t in configured if str(t).strip())
+        if cleaned:
+            return cleaned
+    return DEFAULT_DIRECTION_TERMS
+
+
+def _published_date(c: dict[str, Any]) -> dt.date | None:
+    raw = str(c.get("published") or "").strip()
+    if not raw:
+        return None
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", raw)
+    if m:
+        try:
+            return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    m = re.match(r"(\d{4})", raw)
+    if m:
+        try:
+            return dt.date(int(m.group(1)), 1, 1)
+        except ValueError:
+            return None
+    return None
+
+
+def direction_verdict(c: dict[str, Any], terms: tuple[str, ...]) -> tuple[bool, str]:
+    """Relevance + recency gate. Returns (admitted, reason)."""
+    blob = " ".join([
+        str(c.get("title") or ""),
+        str(c.get("abstract") or ""),
+        str(c.get("url") or ""),
+    ]).lower()
+    if not any(term in blob for term in terms):
+        return False, "off_direction"
+    published = _published_date(c)
+    if published and published.year > dt.date.today().year:
+        return False, "future_dated:" + published.isoformat()
+    return True, "on_direction"
+
+
+def freshness_bonus(c: dict[str, Any]) -> int:
+    published = _published_date(c)
+    if not published:
+        return 0
+    age = (dt.date.today() - published).days
+    return 1 if 0 <= age <= FRESH_WINDOW_DAYS else 0
+
 def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -139,7 +210,14 @@ def fetch_url(url: str, timeout: int = 15) -> tuple[int, str, str]:
 def arxiv_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for q in queries:
-        search = urllib.parse.quote(f'all:"{q}"')
+        # arXiv treats all:"multi word phrase" as an exact phrase, which returns 0 hits for
+        # every multi-word direction query ("wildfire smoke satellite segmentation" -> 0),
+        # silently leaving only the generic config keywords and drifting the selection.
+        # Use the term-wise AND form documented in references/is-paper-like-filter-failures.md.
+        terms = [t for t in re.findall(r"[A-Za-z0-9][A-Za-z0-9.\-]*", q) if len(t) > 2]
+        if not terms:
+            continue
+        search = urllib.parse.quote(" AND ".join(f"all:{t}" for t in terms))
         url = f"https://export.arxiv.org/api/query?search_query={search}&start=0&max_results={max_each}&sortBy=submittedDate&sortOrder=descending"
         code, ctype, text = fetch_url(url, timeout=25)
         if code != 200 or "<entry>" not in text:
@@ -886,11 +964,14 @@ def main() -> int:
         candidates.extend(existing)
         log_event(run_log, type="existing_candidates", count=len(existing))
 
-        arxiv = arxiv_search(queries[:5], max_each=4)
+        # Search every built query, not just the first five: build_queries appends the
+        # direction-specific strings ("wildfire smoke satellite segmentation" etc.) after the
+        # config keywords, and the old queries[:5] slice silently discarded exactly those.
+        arxiv = arxiv_search(queries[:8], max_each=4)
         candidates.extend(arxiv)
         log_event(run_log, type="arxiv_api_candidates", count=len(arxiv))
 
-        crossref = crossref_search(queries[:5], max_each=4)
+        crossref = crossref_search(queries[:8], max_each=4)
         candidates.extend(crossref)
         log_event(run_log, type="crossref_api_candidates", count=len(crossref))
 
@@ -909,16 +990,29 @@ def main() -> int:
         cross_dedup_removed = len(candidates) - len(cross_week_deduped)
         candidates = cross_week_deduped
 
+        terms = direction_terms(config)
         filtered = []
         rejected = []
+        off_direction: list[dict[str, Any]] = []
+        future_dated: list[dict[str, Any]] = []
         for c in candidates:
             ok, score, reasons = is_paper_like(c)
             c["filter_score"] = score
             c["filter_reasons"] = reasons
-            if ok:
-                filtered.append(c)
-            else:
+            if not ok:
                 rejected.append(c)
+                continue
+            admitted, verdict = direction_verdict(c, terms)
+            c["direction_verdict"] = verdict
+            if not admitted:
+                rejected.append(c)
+                if verdict.startswith("future_dated"):
+                    future_dated.append(c)
+                else:
+                    off_direction.append(c)
+                continue
+            c["filter_score"] = score + freshness_bonus(c)
+            filtered.append(c)
 
         filtered.sort(key=lambda x: (x.get("filter_score",0), len(str(x.get("abstract",""))), 1 if x.get("source") != "existing" else 0), reverse=True)
         selected = filtered[: max(1, args.max_selected)]
@@ -930,6 +1024,8 @@ def main() -> int:
             "hard_filter_passed": len(filtered),
             "selected_count": len(selected),
             "rejected_count": len(rejected),
+            "off_direction_rejected": len(off_direction),
+            "future_dated_rejected": len(future_dated),
             "queries": len(queries),
         }
 
