@@ -99,21 +99,17 @@ def _published_date(c: dict[str, Any]) -> dt.date | None:
 
 
 def direction_verdict(c: dict[str, Any], terms: tuple[str, ...]) -> tuple[bool, str]:
-    """Relevance + recency gate. Returns (admitted, reason).
+    """Relevance + recency gate: the candidate title must carry a direction term.
 
-    A single incidental mention is not enough: with a one-hit rule, 2026-W39 admitted a
-    building-damage mapping paper whose abstract merely said post-event optical imagery
-    "may be unavailable because of cloud, smoke, or darkness". Require a direction term
-    in the title, or two distinct direction terms in the text.
+    Anchoring on the title is deliberate. Matching anywhere in the text let 2026-W39 admit a
+    building-damage mapping paper (its abstract merely said post-event imagery "may be
+    unavailable because of cloud, smoke, or darkness") and a satellite-backhaul paper. A
+    title hit is a strong, auditable signal that the work is about the fixed direction.
     """
     title = str(c.get("title") or "").lower()
-    blob = " ".join([title, str(c.get("abstract") or ""), str(c.get("url") or "")]).lower()
-    title_hits = [t for t in terms if t in title]
-    hits = sorted({t for t in terms if t in blob})
+    hits = sorted({t for t in terms if t in title})
     if not hits:
         return False, "off_direction"
-    if not title_hits and len(hits) < 2:
-        return False, "off_direction_incidental:" + ",".join(hits[:3])
     published = _published_date(c)
     if published and published.year > dt.date.today().year:
         return False, "future_dated:" + published.isoformat()
@@ -984,11 +980,15 @@ def main() -> int:
         # Search every built query, not just the first five: build_queries appends the
         # direction-specific strings ("wildfire smoke satellite segmentation" etc.) after the
         # config keywords, and the old queries[:5] slice silently discarded exactly those.
-        arxiv = arxiv_search(queries[:8], max_each=4)
+        # max_each=4 only ever exposed the four newest hits per query, so genuinely new work
+        # (e.g. 2609.16199 Sentinel-2 active-fire benchmark, 2609.25731 EO wildfire-disturbance
+        # embeddings) never entered the pool while the newest four were off-topic. Widen the
+        # window; the direction gate and dedup prune what comes back.
+        arxiv = arxiv_search(queries[:8], max_each=15)
         candidates.extend(arxiv)
         log_event(run_log, type="arxiv_api_candidates", count=len(arxiv))
 
-        crossref = crossref_search(queries[:8], max_each=4)
+        crossref = crossref_search(queries[:8], max_each=8)
         candidates.extend(crossref)
         log_event(run_log, type="crossref_api_candidates", count=len(crossref))
 
@@ -1009,6 +1009,22 @@ def main() -> int:
         cross_week_deduped = [c for c in candidates if canonical_id(c) not in existing_ids]
         cross_dedup_removed = len(candidates) - len(cross_week_deduped)
         candidates = cross_week_deduped
+
+        # Identifier aliasing: the same work can arrive as "arxiv:2606.11676" in one week and
+        # as its journal DOI the next (2026-W39 re-selected W36 papers through their Ecological
+        # Informatics DOI). Exclude on the stored title as well.
+        dedup_titles = {
+            re.sub(r"\s+", " ", str(v.get("title") or "")).strip().lower()
+            for v in dedup.get("papers", {}).values()
+            if isinstance(v, dict) and str(v.get("title") or "").strip()
+        }
+        if dedup_titles:
+            before_title_dedup = len(candidates)
+            candidates = [
+                c for c in candidates
+                if re.sub(r"\s+", " ", str(c.get("title") or "")).strip().lower() not in dedup_titles
+            ]
+            cross_dedup_removed += before_title_dedup - len(candidates)
 
         terms = direction_terms(config)
         filtered = []
