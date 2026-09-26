@@ -46,7 +46,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 - 每期论文数量（默认 5 篇）；
 - 收件邮箱；
 - 每周发送时间与时区；
-- 分析模型与备用模型；
+- 可选的分析模型与备用模型（留空时动态继承 Hermes）；
 - 是否允许显式维护的研究画像或用户反馈影响排序。
 
 默认不会让历史周报自己“训练”出新的兴趣。只有你明确开启画像权重或反馈学习后，历史偏好才会参与筛选。
@@ -122,7 +122,7 @@ plugin-data/hermes-weekly-briefing/
 
 - Hermes `>=0.21.3,<0.22`
 - Python 3.11+
-- 可用的 Hermes OpenAI-compatible 模型提供方
+- Hermes 中已配置且可用的模型；默认继承主模型与回退链
 - WeasyPrint 或 ReportLab，以及可显示中文的系统字体
 - Node.js/npm（仅在需要安装 Agently CLI 时）
 - Agently CLI 的有效邮件登录

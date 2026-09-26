@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -27,45 +25,10 @@ def _load_hermes_config(path: Path) -> dict[str, Any]:
 
 def resolve_backend(config: dict[str, Any], hermes_home: Path) -> dict[str, Any]:
     analysis = config.get("analysis") if isinstance(config.get("analysis"), dict) else {}
-    provider_name = str(analysis.get("provider_name") or "USTC")
-    model = str(analysis.get("model") or "deepseek-flash")
-    fallback_model = str(analysis.get("fallback_model") or "qwen3.6-chat")
-    endpoint = str(analysis.get("endpoint") or "").rstrip("/")
-    api_key = ""
-    api_key_env = str(analysis.get("api_key_env") or "")
-    if api_key_env:
-        api_key = os.getenv(api_key_env, "")
-
-    hermes = _load_hermes_config(hermes_home / "config.yaml")
-    providers = hermes.get("custom_providers") if isinstance(hermes, dict) else []
-    if isinstance(providers, list):
-        candidates = [
-            item for item in providers
-            if isinstance(item, dict)
-            and str(item.get("name") or "").casefold() == provider_name.casefold()
-        ]
-        # Prefer the complete provider entry over historical duplicate stubs.
-        candidates.sort(
-            key=lambda item: (
-                bool(item.get("api_key")), bool(item.get("models")), bool(item.get("base_url"))
-            ),
-            reverse=True,
-        )
-        if candidates:
-            provider = candidates[0]
-            endpoint = endpoint or str(provider.get("base_url") or "").rstrip("/")
-            api_key = api_key or str(provider.get("api_key") or "")
-
-    if not endpoint:
-        raise RuntimeError(f"Hermes provider {provider_name!r} has no endpoint")
-    if not api_key:
-        raise RuntimeError(f"Hermes provider {provider_name!r} has no API key")
     return {
-        "provider_name": provider_name,
-        "model": model,
-        "fallback_model": fallback_model,
-        "endpoint": endpoint,
-        "api_key": api_key,
+        "provider_name": "hermes",
+        "model": str(analysis.get("model") or "").strip(),
+        "fallback_model": str(analysis.get("fallback_model") or "").strip(),
         "timeout_seconds": int(analysis.get("timeout_seconds") or 180),
         "max_tokens": min(8192, max(2000, int(analysis.get("max_tokens") or 7000))),
     }
@@ -89,26 +52,29 @@ def _json_object(text: str) -> dict[str, Any]:
 def _request_analysis(
     backend: dict[str, Any], model: str, system: str, user: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    body = json.dumps({
-        "model": model,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "temperature": 0,
-        "max_tokens": backend["max_tokens"],
-        "response_format": {"type": "json_object"},
-    }, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        backend["endpoint"] + "/chat/completions",
-        data=body,
-        headers={"Authorization": "Bearer " + backend["api_key"], "Content-Type": "application/json"},
-        method="POST",
+    try:
+        from agent.auxiliary_client import call_llm, extract_content_or_reasoning
+    except Exception as exc:
+        raise RuntimeError("Hermes auxiliary model router is unavailable") from exc
+    route_info: dict[str, str] = {}
+    response = call_llm(
+        task="weekly_briefing",
+        model=model or None,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=0,
+        max_tokens=backend["max_tokens"],
+        timeout=backend["timeout_seconds"],
+        extra_body={"response_format": {"type": "json_object"}},
+        route_info=route_info,
     )
-    with urllib.request.urlopen(request, timeout=backend["timeout_seconds"]) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    content = payload["choices"][0]["message"]["content"]
+    content = extract_content_or_reasoning(response)
     result = _json_object(content)
     if not isinstance(result.get("papers"), dict):
         raise RuntimeError("analysis JSON is missing papers")
-    return result, payload
+    return result, {
+        "model": route_info.get("resolved_model") or route_info.get("model") or model or "hermes-primary",
+        "provider": route_info.get("resolved_provider") or "hermes",
+    }
 
 
 def analyze_papers(
@@ -160,10 +126,10 @@ def analyze_papers(
         result, payload = _request_analysis(backend, fallback_model, system, user)
         fallback_used = True
     provenance = {
-        "provider": backend["provider_name"],
-        "requested_model": backend["model"],
+        "provider": str(payload.get("provider") or backend["provider_name"]),
+        "requested_model": backend["model"] or "inherit",
         "actual_model": str(payload.get("model") or (backend["fallback_model"] if fallback_used else backend["model"])),
-        "fallback_model": backend["fallback_model"],
+        "fallback_model": backend["fallback_model"] or "inherit",
         "fallback_used": fallback_used,
         "paper_count": len(papers),
     }

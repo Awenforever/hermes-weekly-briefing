@@ -377,7 +377,7 @@ def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> 
                 "version": 2,
                 "max_selected": 5,
                 "research": {"core_keywords": clean_keywords, "use_profile_weights": False, "use_user_feedback": False},
-                "analysis": {"auto": True, "provider_name": "USTC", "model": "deepseek-flash", "fallback_model": "qwen3.6-chat", "timeout_seconds": 180, "max_tokens": 7000},
+                "analysis": {"auto": True, "provider_name": "hermes", "model": "", "fallback_model": "", "timeout_seconds": 180, "max_tokens": 7000},
                 "delivery": {"channel": "email", "email_to": clean_emails},
                 "schedule": {"expression": "0 2 * * 5", "timezone": "Asia/Shanghai"},
             }

@@ -1,5 +1,5 @@
 name: hermes-weekly-briefing
-version: 4.2.0
+version: 4.3.0
 manifest_version: 1
 api_version: 1
 description: Research discovery, author-team context, polished PDF rendering, and email-only delivery.
@@ -24,3 +24,11 @@ config_schema:
     type: str
     default: email
     description: Delivery channel; v4 accepts email only.
+  analysis_model:
+    type: str
+    default: ""
+    description: Optional Hermes model alias; empty inherits the active primary model.
+  analysis_fallback_model:
+    type: str
+    default: ""
+    description: Optional Hermes model alias; empty inherits Hermes fallback routing.
