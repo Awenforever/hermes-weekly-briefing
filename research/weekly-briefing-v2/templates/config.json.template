@@ -38,8 +38,12 @@
     ]
   },
   "search": {
-    "sources": ["arxiv", "crossref"],
+    "sources": ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"],
     "semantic_scholar_api_key_env": "SEMANTIC_SCHOLAR_API_KEY",
+    "openalex_api_key_env": "OPENALEX_API_KEY",
+    "scopus_api_key_env": "SCOPUS_API_KEY",
+    "scopus_insttoken_env": "SCOPUS_INSTTOKEN",
+    "google_scholar_api_key_env": "SERPAPI_API_KEY",
     "min_sources_per_run": 1,
     "lookback_weeks": 3,
     "citation_spike_threshold_per_week": 15

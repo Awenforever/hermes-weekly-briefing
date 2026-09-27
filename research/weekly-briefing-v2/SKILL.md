@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 安装、个性化配置、运行并通过邮件交付研究论文周报；包含作者团队调研、可点击原文链接和中文 PDF。
-version: 4.5.0
+version: 4.6.0
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver

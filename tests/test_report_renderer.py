@@ -138,8 +138,44 @@ class ReportRendererTests(unittest.TestCase):
 
     def test_source_labels_never_expose_cache_filenames(self):
         self.assertEqual(runner.source_label({"arxiv_id": "2307.00104", "source": "existing:w36_arxiv_raw.json"}), "arXiv")
-        self.assertEqual(runner.source_label({"doi": "10.1/example", "source": "cached.json"}), "DOI / Crossref")
+        self.assertEqual(runner.source_label({"doi": "10.1/example", "source": "cached.json"}), "DOI")
         self.assertEqual(runner.source_label({"source": "existing:legacy.json"}), "历史学术候选库")
+
+    def test_queries_and_direction_are_derived_from_user_configuration(self):
+        config = {"research": {
+            "core_keywords": ["protein folding"],
+            "method_keywords": ["graph neural network"],
+            "cross_domain_interests": ["drug discovery"],
+        }}
+        queries = runner.build_queries(config, {}, {})
+        self.assertIn("protein folding graph neural network", queries)
+        self.assertIn("protein folding drug discovery", queries)
+        self.assertNotIn("wildfire smoke", queries)
+        terms = runner.direction_terms(config)
+        self.assertEqual(("protein folding", "drug discovery"), terms)
+        self.assertTrue(runner.direction_verdict({"title": "Graph Models for Protein Folding"}, terms)[0])
+
+    def test_dedup_merges_metadata_and_preserves_discovery_provenance(self):
+        candidates = [
+            {"title": "Shared paper", "doi": "10.1/shared", "abstract": "short", "source": "crossref_api", "authors": ["A"]},
+            {"title": "Shared paper", "doi": "10.1/shared", "abstract": "a substantially richer abstract", "source": "openalex_api", "authors": ["A", "B"]},
+        ]
+        merged = runner.dedup_candidates(candidates)
+        self.assertEqual(1, len(merged))
+        self.assertEqual(["crossref_api", "openalex_api"], merged[0]["discovery_sources"])
+        self.assertEqual("a substantially richer abstract", merged[0]["abstract"])
+        self.assertEqual(["A", "B"], merged[0]["authors"])
+
+    def test_selection_prefers_new_source_only_within_quality_band(self):
+        candidates = [
+            {"title": "A", "filter_score": 8, "source": "arxiv_api", "discovery_sources": ["arxiv_api"]},
+            {"title": "B", "filter_score": 8, "source": "arxiv_api", "discovery_sources": ["arxiv_api"]},
+            {"title": "C", "filter_score": 7, "source": "openalex_api", "discovery_sources": ["openalex_api"]},
+            {"title": "D", "filter_score": 4, "source": "dblp_api", "discovery_sources": ["dblp_api"]},
+        ]
+        selected = runner.select_source_diverse(candidates, 3)
+        self.assertEqual(["A", "C", "B"], [paper["title"] for paper in selected])
+        self.assertNotIn("D", [paper["title"] for paper in selected])
 
     def test_quality_gate_rejects_missing_author_identity(self):
         with tempfile.TemporaryDirectory() as raw:

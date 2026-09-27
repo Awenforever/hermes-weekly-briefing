@@ -11,11 +11,15 @@ import shutil
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 
-SUPPORTED_SEARCH_SOURCES = {"arxiv", "crossref", "semantic_scholar"}
+SUPPORTED_SEARCH_SOURCES = {
+    "arxiv", "crossref", "semantic_scholar", "openalex", "dblp",
+    "openreview", "scopus", "google_scholar",
+}
 
 
 def _home() -> Path:
@@ -46,6 +50,10 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup.add_argument("--fallback-model", default=None)
     setup.add_argument("--search-source", action="append", default=[])
     setup.add_argument("--semantic-scholar-api-key-env", default=None)
+    setup.add_argument("--openalex-api-key-env", default=None)
+    setup.add_argument("--scopus-api-key-env", default=None)
+    setup.add_argument("--scopus-insttoken-env", default=None)
+    setup.add_argument("--google-scholar-api-key-env", default=None)
     setup.add_argument("--use-profile-weights", action=argparse.BooleanOptionalAction, default=None)
     setup.add_argument("--use-user-feedback", action=argparse.BooleanOptionalAction, default=None)
     init = actions.add_parser("init", help="Initialize configuration or migrate legacy Weekly Briefing data")
@@ -144,7 +152,7 @@ def _config_diagnostics() -> list[str]:
     if not [value for value in recipients if "@" in str(value) and "$" not in str(value)]:
         errors.append("delivery.email_to needs at least one real email address")
     search = config.get("search") if isinstance(config.get("search"), dict) else {}
-    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["arxiv", "crossref"]
+    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"]
     sources = {
         str(value).strip().casefold().replace("-", "_")
         for value in raw_sources
@@ -160,7 +168,7 @@ def _config_diagnostics() -> list[str]:
 
 def _search_status(config: dict, probe: bool = True) -> dict:
     search = config.get("search") if isinstance(config.get("search"), dict) else {}
-    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["arxiv", "crossref"]
+    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"]
     sources = [
         str(value).strip().casefold().replace("-", "_")
         for value in raw_sources
@@ -170,6 +178,11 @@ def _search_status(config: dict, probe: bool = True) -> dict:
         "arxiv": "https://export.arxiv.org/api/query?search_query=all%3Atest&start=0&max_results=1",
         "crossref": "https://api.crossref.org/works?query=test&rows=1",
         "semantic_scholar": "https://api.semanticscholar.org/graph/v1/paper/search?query=test&limit=1&fields=title",
+        "openalex": "https://api.openalex.org/works?search=test&per_page=1&select=id,title",
+        "dblp": "https://dblp.org/search/publ/api?q=test&h=1&format=json",
+        "openreview": "https://api2.openreview.net/notes/search?term=test&content=title&source=forum&limit=1",
+        "scopus": "https://api.elsevier.com/content/search/scopus?query=TITLE-ABS-KEY%28test%29&count=1",
+        "google_scholar": "https://serpapi.com/search.json?engine=google_scholar&q=test&num=1",
     }
     details = []
     for source in sources:
@@ -189,6 +202,34 @@ def _search_status(config: dict, probe: bool = True) -> dict:
             if key:
                 headers["x-api-key"] = key
             item["credential"] = "configured" if key else "anonymous"
+        elif source == "openalex":
+            key_env = str(search.get("openalex_api_key_env") or "OPENALEX_API_KEY").strip()
+            key = str(os.environ.get(key_env) or "").strip()
+            if key:
+                headers["Authorization"] = "Bearer " + key
+            item["credential"] = "configured" if key else "anonymous"
+        elif source == "scopus":
+            key_env = str(search.get("scopus_api_key_env") or "SCOPUS_API_KEY").strip()
+            key = str(os.environ.get(key_env) or "").strip()
+            token_env = str(search.get("scopus_insttoken_env") or "SCOPUS_INSTTOKEN").strip()
+            insttoken = str(os.environ.get(token_env) or "").strip()
+            if not key:
+                item.update({"diagnostic": f"credential missing: {key_env}", "credential": "missing"})
+                details.append(item)
+                continue
+            headers["X-ELS-APIKey"] = key
+            if insttoken:
+                headers["X-ELS-Insttoken"] = insttoken
+            item["credential"] = "configured"
+        elif source == "google_scholar":
+            key_env = str(search.get("google_scholar_api_key_env") or "SERPAPI_API_KEY").strip()
+            key = str(os.environ.get(key_env) or "").strip()
+            if not key:
+                item.update({"diagnostic": f"credential missing: {key_env}; Google Scholar has no public official search API", "credential": "missing"})
+                details.append(item)
+                continue
+            probes[source] += "&api_key=" + urllib.parse.quote(key)
+            item["credential"] = "configured via SerpApi"
         try:
             request = urllib.request.Request(probes[source], headers=headers)
             with urllib.request.urlopen(request, timeout=10) as response:
@@ -209,7 +250,7 @@ def _search_status(config: dict, probe: bool = True) -> dict:
         "next_action": (
             "academic discovery is ready"
             if ready else
-            "configure at least one supported engine (arxiv, crossref, semantic_scholar) and ensure Hermes egress can reach it"
+            "configure at least one supported engine and its optional credential; open sources include OpenAlex, Semantic Scholar, DBLP, OpenReview, Crossref and arXiv"
         ),
     }
 
@@ -469,6 +510,15 @@ def _configure(args: argparse.Namespace) -> int:
         ))
     if getattr(args, "semantic_scholar_api_key_env", None):
         search["semantic_scholar_api_key_env"] = str(args.semantic_scholar_api_key_env).strip()
+    for arg_name, config_name in (
+        ("openalex_api_key_env", "openalex_api_key_env"),
+        ("scopus_api_key_env", "scopus_api_key_env"),
+        ("scopus_insttoken_env", "scopus_insttoken_env"),
+        ("google_scholar_api_key_env", "google_scholar_api_key_env"),
+    ):
+        value = getattr(args, arg_name, None)
+        if value:
+            search[config_name] = str(value).strip()
     if args.use_profile_weights is not None:
         research["use_profile_weights"] = args.use_profile_weights
     if args.use_user_feedback is not None:
@@ -502,7 +552,14 @@ def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> 
                 "max_selected": 5,
                 "research": {"core_keywords": clean_keywords, "use_profile_weights": False, "use_user_feedback": False},
                 "analysis": {"auto": True, "provider_name": "hermes", "model": "", "fallback_model": "", "timeout_seconds": 180, "max_tokens": 7000},
-                "search": {"sources": ["arxiv", "crossref"], "semantic_scholar_api_key_env": "SEMANTIC_SCHOLAR_API_KEY"},
+                "search": {
+                    "sources": ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"],
+                    "semantic_scholar_api_key_env": "SEMANTIC_SCHOLAR_API_KEY",
+                    "openalex_api_key_env": "OPENALEX_API_KEY",
+                    "scopus_api_key_env": "SCOPUS_API_KEY",
+                    "scopus_insttoken_env": "SCOPUS_INSTTOKEN",
+                    "google_scholar_api_key_env": "SERPAPI_API_KEY",
+                },
                 "delivery": {"channel": "email", "email_to": clean_emails},
                 "schedule": {"expression": "0 2 * * 5", "timezone": "Asia/Shanghai"},
             }
@@ -579,6 +636,8 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
                 "email_to", "keyword", "max_selected", "timezone", "schedule", "provider",
                 "model", "fallback_model", "use_profile_weights", "use_user_feedback",
                 "search_source", "semantic_scholar_api_key_env",
+                "openalex_api_key_env", "scopus_api_key_env", "scopus_insttoken_env",
+                "google_scholar_api_key_env",
             )
         )
         if supplied:

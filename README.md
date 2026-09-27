@@ -12,7 +12,7 @@ Weekly Briefing 会围绕你的研究方向发现并筛选论文，完成基于�
 
 | 能力 | 你会得到什么 |
 |---|---|
-| 论文发现 | 围绕固定研究主线检索、去重和筛选，而不是追逐泛化热点 |
+| 论文发现 | 跨开放索引、预印本、会议评审与可选商业数据库检索，不依赖单一平台 |
 | 搜索体检 | 自动发现并实测学术搜索源；不可用时先引导配置，不带病启用计划任务 |
 | 深度解读 | 研究问题、方法步骤、证据、对照、局限与跨论文关系 |
 | 团队画像 | 作者机构、研究主题、代表性工作与研究路径线索 |
@@ -32,7 +32,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 1. 检查旧版数据并安全迁移，不覆盖已有配置和历史报告；
 2. 逐项询问尚未确定的个性化设置，而不是让你手写配置文件；
 3. 检查分析模型、PDF 渲染器与 Agently 邮件工具；
-4. 探测 arXiv、Crossref 或 Semantic Scholar，至少确认一个真实可用的学术搜索源；
+4. 实测所选学术搜索源，并说明开放来源与需要凭据的可选来源；
 5. 如缺少 Agently，在征得同意后安装；
 6. 打开 Agently 的交互式登录流程，由你在终端或浏览器中完成授权；
 7. 验证登录状态，生成一份测试周报；
@@ -50,7 +50,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 - 收件邮箱；
 - 每周发送时间与时区；
 - 可选的分析模型与备用模型（留空时动态继承 Hermes）；
-- 学术搜索源；Semantic Scholar 可选择匿名访问或引用 Hermes 环境中已有的 API Key 变量；
+- 学术搜索源；开放来源默认开箱即用，凭据型来源只引用 Hermes 环境中的变量；
 - 是否允许显式维护的研究画像或用户反馈影响排序。
 
 默认不会让历史周报自己“训练”出新的兴趣。只有你明确开启画像权重或反馈学习后，历史偏好才会参与筛选。
@@ -72,24 +72,40 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 
 ## 学术搜索源
 
-Weekly Briefing 当前原生支持 `arxiv`、`crossref` 与 `semantic_scholar`。安装过程不会只检查配置文件里有没有名字，而会实际请求所选服务：至少一个来源可用，`doctor` 才会放行计划任务。
+Weekly Briefing 默认同时使用 `OpenAlex`、`Semantic Scholar`、`Crossref`、`arXiv`、`DBLP` 与 `OpenReview`。同一论文从多个索引返回时会合并为一条，保留完整来源轨迹并择优补全摘要、作者、DOI 和发布日期；最终筛选只在质量接近时偏向来源多样性，不用生硬配额把低质量论文塞进周报。
+
+还可按需启用 `Scopus` 和 `Google Scholar`：Scopus 使用 Elsevier API Key（机构环境可另配 Insttoken）；Google Scholar 没有公开官方检索 API，因此插件只支持用户主动配置的 SerpApi，不直接抓取 Scholar 网页。没有这些凭据不会影响默认六个来源工作。
 
 ```bash
 # 查看配置来源及实时连通性
 hermes weekly-briefing search-status
 
-# 选择两个无需密钥的来源
+# 自选开放来源
 hermes weekly-briefing setup \
+  --search-source openalex \
+  --search-source semantic_scholar \
+  --search-source crossref \
   --search-source arxiv \
-  --search-source crossref
+  --search-source dblp \
+  --search-source openreview
 
 # 可选：使用由 Hermes/系统环境管理的 Semantic Scholar 密钥
 hermes weekly-briefing setup \
   --search-source semantic_scholar \
   --semantic-scholar-api-key-env SEMANTIC_SCHOLAR_API_KEY
+
+# 可选：把凭据留在 Hermes/系统环境，插件只保存变量名
+hermes weekly-briefing setup \
+  --search-source scopus \
+  --scopus-api-key-env SCOPUS_API_KEY \
+  --scopus-insttoken-env SCOPUS_INSTTOKEN
+
+hermes weekly-briefing setup \
+  --search-source google_scholar \
+  --google-scholar-api-key-env SERPAPI_API_KEY
 ```
 
-插件只保存“使用哪个环境变量”的选择，不接管或复制密钥。如果所有来源都不可达，安装引导会停在搜索配置步骤，并说明需要配置来源、网络出口或代理。
+插件只保存“使用哪个环境变量”的选择，不接管、复制或输出密钥。安装过程会真实请求每个已选来源；如果全部不可达，引导会停在搜索配置步骤，并说明需要配置来源、凭据、网络出口或代理。
 
 ## 交付边界
 

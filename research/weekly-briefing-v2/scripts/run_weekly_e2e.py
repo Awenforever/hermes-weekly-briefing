@@ -42,6 +42,7 @@ ACADEMIC_DOMAINS = {
     "researchgate.net", "semanticscholar.org", "sagepub.com", "tandfonline.com",
     "frontiersin.org", "copernicus.org", "agu.org", "egu.eu",
     "neurips.cc", "openaccess.thecvf.com", "eartharxiv", "essopenarchive.org",
+    "openalex.org", "dblp.org", "openreview.net", "scopus.com",
 }
 NON_ACADEMIC_DOMAINS = {
     "github.com", "youtube.com", "twitter.com", "linkedin.com", "medium.com",
@@ -49,34 +50,23 @@ NON_ACADEMIC_DOMAINS = {
     "stackoverflow.com", "stackexchange.com", "quora.com", "substack.com",
 }
 
-# --- Fixed research direction guard -------------------------------------------
-# The briefing's scope is wildfire smoke detection/segmentation from satellite and
-# multispectral imagery. Generic query strings such as "deep learning segmentation" or
-# "multispectral image analysis" make arXiv/Crossref return medical, telecom and
-# agriculture papers (MRI stroke, retinal OCT, renal tumours, 6G channels, wheat
-# disease), which then win the score-based selection and drift the report off-direction.
-# Every admitted candidate must therefore carry at least one direction term.
-DEFAULT_DIRECTION_TERMS = (
-    "wildfire", "wild fire", "wildland fire", "forest fire", "bushfire",
-    "brush fire", "peat fire", "smoke", "smouldering", "smoldering",
-    "burned area", "burnt area", "burn scar", "burn severity",
-    "fire detection", "fire segmentation", "active fire", "fire danger",
-    "fire risk", "fire spread", "fire weather", "fire radiative",
-    "pyrocumul", "pyroconvect", "ember", "combustion", "prescribed burn",
-)
-
 # Candidates published after the current year are pipeline artefacts (Crossref
 # "sort=published&order=desc" serves future-dated records) and must never be selected.
 FRESH_WINDOW_DAYS = 180
 
 
 def direction_terms(config: dict[str, Any]) -> tuple[str, ...]:
-    configured = (config.get("research") or {}).get("direction_terms")
+    research = config.get("research") if isinstance(config.get("research"), dict) else {}
+    configured = research.get("direction_terms")
     if isinstance(configured, list):
         cleaned = tuple(str(t).strip().lower() for t in configured if str(t).strip())
         if cleaned:
             return cleaned
-    return DEFAULT_DIRECTION_TERMS
+    derived = []
+    for field in ("core_keywords", "cross_domain_interests"):
+        values = research.get(field) if isinstance(research.get(field), list) else []
+        derived.extend(str(value).strip().lower() for value in values if str(value).strip())
+    return tuple(dict.fromkeys(derived))
 
 
 def _published_date(c: dict[str, Any]) -> dt.date | None:
@@ -99,15 +89,16 @@ def _published_date(c: dict[str, Any]) -> dt.date | None:
 
 
 def direction_verdict(c: dict[str, Any], terms: tuple[str, ...]) -> tuple[bool, str]:
-    """Relevance + recency gate: the candidate title must carry a direction term.
-
-    Anchoring on the title is deliberate. Matching anywhere in the text let 2026-W39 admit a
-    building-damage mapping paper (its abstract merely said post-event imagery "may be
-    unavailable because of cloud, smoke, or darkness") and a satellite-backhaul paper. A
-    title hit is a strong, auditable signal that the work is about the fixed direction.
-    """
+    """Apply the user-configured relevance and future-date gates."""
     title = str(c.get("title") or "").lower()
-    hits = sorted({t for t in terms if t in title})
+    hits = []
+    for term in terms:
+        if term in title:
+            hits.append(term)
+            continue
+        words = [word for word in re.findall(r"[a-z0-9\u4e00-\u9fff]+", term) if len(word) > 2]
+        if len(words) >= 2 and sum(word in title for word in words) >= 2:
+            hits.append(term)
     if not hits:
         return False, "off_direction"
     published = _published_date(c)
@@ -255,9 +246,13 @@ def arxiv_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
 
 def crossref_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
+    from_date = (dt.date.today() - dt.timedelta(days=730)).isoformat()
     for q in queries:
         encoded = urllib.parse.quote(q)
-        url = f"https://api.crossref.org/works?query={encoded}&rows={max_each}&sort=published&order=desc&filter=type:journal-article"
+        url = (
+            f"https://api.crossref.org/works?query.title={encoded}&rows={max_each}"
+            f"&filter=type:journal-article,from-pub-date:{from_date}"
+        )
         code, ctype, text = fetch_url(url, timeout=25)
         if code != 200:
             continue
@@ -340,6 +335,228 @@ def semantic_scholar_search(queries: list[str], max_each: int = 5, api_key_env: 
             })
     return out
 
+
+def _openalex_abstract(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    positions: list[tuple[int, str]] = []
+    for token, indexes in value.items():
+        if not isinstance(indexes, list):
+            continue
+        positions.extend((int(index), str(token)) for index in indexes if str(index).isdigit())
+    return normalize_title(" ".join(token for _index, token in sorted(positions)))
+
+
+def openalex_search(
+    queries: list[str], max_each: int = 5, api_key_env: str = "OPENALEX_API_KEY"
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    headers = {"User-Agent": "hermes-weekly-briefing/4.6"}
+    api_key = str(os.environ.get(api_key_env) or "").strip()
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
+    for query in queries:
+        params = urllib.parse.urlencode({
+            "search": query,
+            "per_page": max_each,
+            "filter": f"from_publication_date:{(dt.date.today() - dt.timedelta(days=730)).isoformat()}",
+            "select": "id,doi,display_name,publication_date,authorships,abstract_inverted_index,primary_location,type",
+        })
+        req = urllib.request.Request("https://api.openalex.org/works?" + params, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=25) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+        except Exception:
+            continue
+        for item in payload.get("results") or []:
+            if not isinstance(item, dict):
+                continue
+            raw_doi = str(item.get("doi") or "").strip()
+            doi = re.sub(r"^https?://doi\.org/", "", raw_doi, flags=re.I)
+            location = item.get("primary_location") if isinstance(item.get("primary_location"), dict) else {}
+            landing = str(location.get("landing_page_url") or item.get("id") or "").strip()
+            authors = []
+            for authorship in item.get("authorships") or []:
+                author = authorship.get("author") if isinstance(authorship, dict) else {}
+                name = str(author.get("display_name") or "").strip() if isinstance(author, dict) else ""
+                if name:
+                    authors.append(name)
+            out.append({
+                "title": str(item.get("display_name") or "").strip(),
+                "abstract": _openalex_abstract(item.get("abstract_inverted_index")),
+                "url": f"https://doi.org/{doi}" if doi else landing,
+                "doi": doi,
+                "published": str(item.get("publication_date") or "").strip(),
+                "authors": authors[:10],
+                "source": "openalex_api",
+                "openalex_id": str(item.get("id") or "").strip(),
+            })
+    return out
+
+
+def dblp_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for query in queries:
+        params = urllib.parse.urlencode({"q": query, "h": max_each, "format": "json"})
+        code, _ctype, text = fetch_url("https://dblp.org/search/publ/api?" + params, timeout=25)
+        if code != 200:
+            continue
+        try:
+            hits = json.loads(text).get("result", {}).get("hits", {}).get("hit", [])
+        except Exception:
+            continue
+        for hit in hits if isinstance(hits, list) else []:
+            info = hit.get("info") if isinstance(hit, dict) else {}
+            if not isinstance(info, dict):
+                continue
+            raw_authors = (info.get("authors") or {}).get("author", []) if isinstance(info.get("authors"), dict) else []
+            if isinstance(raw_authors, (str, dict)):
+                raw_authors = [raw_authors]
+            authors = [
+                str(author.get("text") or "").strip() if isinstance(author, dict) else str(author).strip()
+                for author in raw_authors
+            ]
+            ee = info.get("ee")
+            if isinstance(ee, list):
+                ee = next((value for value in ee if str(value).startswith("http")), "")
+            url = str(ee or info.get("url") or "").strip()
+            out.append({
+                "title": normalize_title(str(info.get("title") or "")),
+                "abstract": "",
+                "url": url,
+                "doi": extract_doi(url) or "",
+                "published": str(info.get("year") or "").strip(),
+                "authors": [name for name in authors if name][:10],
+                "venue": str(info.get("venue") or "").strip(),
+                "source": "dblp_api",
+            })
+    return out
+
+
+def openreview_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for query in queries:
+        params = urllib.parse.urlencode({
+            "term": query, "content": "all", "source": "forum",
+            "sort": "tmdate:desc", "limit": max_each,
+        })
+        code, _ctype, text = fetch_url("https://api2.openreview.net/notes/search?" + params, timeout=25)
+        if code != 200:
+            continue
+        try:
+            notes = json.loads(text).get("notes") or []
+        except Exception:
+            continue
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+            content = note.get("content") if isinstance(note.get("content"), dict) else {}
+            def value(name: str) -> Any:
+                raw = content.get(name)
+                return raw.get("value") if isinstance(raw, dict) and "value" in raw else raw
+            authors = value("authors") or []
+            if isinstance(authors, str):
+                authors = [authors]
+            note_id = str(note.get("forum") or note.get("id") or "").strip()
+            out.append({
+                "title": normalize_title(str(value("title") or "")),
+                "abstract": normalize_title(str(value("abstract") or value("TL;DR") or "")),
+                "url": f"https://openreview.net/forum?id={urllib.parse.quote(note_id)}" if note_id else "",
+                "published": dt.datetime.fromtimestamp(float(note.get("cdate") or note.get("pdate") or 0) / 1000, tz=dt.timezone.utc).date().isoformat() if (note.get("cdate") or note.get("pdate")) else "",
+                "authors": [str(name).strip() for name in authors if str(name).strip()][:10],
+                "venue": str(value("venue") or value("venueid") or "").strip(),
+                "source": "openreview_api",
+                "openreview_id": note_id,
+            })
+    return out
+
+
+def scopus_search(
+    queries: list[str], max_each: int = 5,
+    api_key_env: str = "SCOPUS_API_KEY", insttoken_env: str = "SCOPUS_INSTTOKEN",
+) -> list[dict[str, Any]]:
+    api_key = str(os.environ.get(api_key_env) or "").strip()
+    if not api_key:
+        return []
+    headers = {"Accept": "application/json", "X-ELS-APIKey": api_key, "User-Agent": "hermes-weekly-briefing/4.6"}
+    insttoken = str(os.environ.get(insttoken_env) or "").strip()
+    if insttoken:
+        headers["X-ELS-Insttoken"] = insttoken
+    out: list[dict[str, Any]] = []
+    for query in queries:
+        query_terms = re.findall(r"[A-Za-z0-9\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff.-]+", query)
+        if not query_terms:
+            continue
+        scopus_query = "TITLE-ABS-KEY(" + " AND ".join(query_terms) + ")"
+        params = urllib.parse.urlencode({"query": scopus_query, "count": max_each, "sort": "-coverDate", "view": "STANDARD"})
+        req = urllib.request.Request("https://api.elsevier.com/content/search/scopus?" + params, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=25) as response:
+                entries = json.loads(response.read().decode("utf-8", errors="replace")).get("search-results", {}).get("entry", [])
+        except Exception:
+            continue
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            doi = str(item.get("prism:doi") or "").strip()
+            eid = str(item.get("eid") or item.get("dc:identifier") or "").strip()
+            out.append({
+                "title": normalize_title(str(item.get("dc:title") or "")),
+                "abstract": normalize_title(str(item.get("dc:description") or "")),
+                "url": f"https://doi.org/{doi}" if doi else (f"https://www.scopus.com/record/display.uri?eid={urllib.parse.quote(eid)}" if eid else ""),
+                "doi": doi,
+                "published": str(item.get("prism:coverDate") or "").strip(),
+                "authors": [str(item.get("dc:creator") or "").strip()] if item.get("dc:creator") else [],
+                "venue": str(item.get("prism:publicationName") or "").strip(),
+                "source": "scopus_api",
+                "scopus_id": eid,
+            })
+    return out
+
+
+def google_scholar_search(
+    queries: list[str], max_each: int = 5, api_key_env: str = "SERPAPI_API_KEY"
+) -> list[dict[str, Any]]:
+    """Search Google Scholar through an explicitly configured SerpApi account.
+
+    Google does not expose a public official Scholar search API.  This adapter
+    is therefore opt-in and never scrapes Scholar pages directly.
+    """
+    api_key = str(os.environ.get(api_key_env) or "").strip()
+    if not api_key:
+        return []
+    out: list[dict[str, Any]] = []
+    for query in queries:
+        params = urllib.parse.urlencode({
+            "engine": "google_scholar", "q": query, "num": min(20, max_each),
+            "hl": "en", "scisbd": "1", "api_key": api_key,
+        })
+        code, _ctype, text = fetch_url("https://serpapi.com/search.json?" + params, timeout=30)
+        if code != 200:
+            continue
+        try:
+            results = json.loads(text).get("organic_results") or []
+        except Exception:
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            publication = item.get("publication_info") if isinstance(item.get("publication_info"), dict) else {}
+            summary = str(publication.get("summary") or "")
+            year_match = re.search(r"\b(20\d{2}|19\d{2})\b", summary)
+            authors = publication.get("authors") if isinstance(publication.get("authors"), list) else []
+            out.append({
+                "title": normalize_title(str(item.get("title") or "")),
+                "abstract": normalize_title(str(item.get("snippet") or "")),
+                "url": str(item.get("link") or "").strip(),
+                "doi": extract_doi(str(item.get("link") or "") + " " + str(item.get("snippet") or "")) or "",
+                "published": year_match.group(1) if year_match else "",
+                "authors": [str(author.get("name") or "").strip() for author in authors if isinstance(author, dict) and author.get("name")],
+                "source": "google_scholar_serpapi",
+                "cited_by": int(((item.get("inline_links") or {}).get("cited_by") or {}).get("total") or 0),
+            })
+    return out
+
 def is_paper_like(c: dict[str, Any]) -> tuple[bool, int, list[str]]:
     score = 0
     reasons = []
@@ -370,35 +587,40 @@ def is_paper_like(c: dict[str, Any]) -> tuple[bool, int, list[str]]:
     return score >= 2, score, reasons
 
 def dedup_candidates(cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen = set()
-    out = []
+    merged: dict[str, dict[str, Any]] = {}
     for c in cands:
         cid = canonical_id(c)
-        if not cid or cid in seen:
+        if not cid:
             continue
-        seen.add(cid)
-        out.append(c)
-    return out
+        source = str(c.get("source") or "").strip()
+        if cid not in merged:
+            item = dict(c)
+            item["discovery_sources"] = [source] if source else []
+            merged[cid] = item
+            continue
+        item = merged[cid]
+        provenance = item.setdefault("discovery_sources", [])
+        if source and source not in provenance:
+            provenance.append(source)
+        for field in ("title", "abstract", "url", "doi", "arxiv_id", "published", "venue"):
+            incoming = c.get(field)
+            current = item.get(field)
+            if incoming and (not current or len(str(incoming)) > len(str(current))):
+                item[field] = incoming
+        authors = list(dict.fromkeys([*(item.get("authors") or []), *(c.get("authors") or [])]))
+        item["authors"] = authors[:20]
+    return list(merged.values())
 
 def build_queries(config: dict[str, Any], profile: dict[str, Any], feedback: dict[str, Any]) -> list[str]:
-    # Direction-anchored queries come FIRST and drive the API search. The config keywords
-    # ("deep learning segmentation", "multispectral image analysis", ...) are kept for the
-    # record but are generic: searched on arXiv they return MRI/OCT/6G/agriculture papers,
-    # and the fixed direction then depends on a post-hoc filter. These short, direction-locked
-    # strings were measured against the live API on 2026-09-25 (see w39_widen.py) and each
-    # returns current wildfire/smoke work.
-    base = [
-        "wildfire smoke",
-        "wildfire smoke detection",
-        "wildfire smoke satellite segmentation",
-        "multispectral smoke detection",
-        "wildfire detection satellite imagery",
-        "active fire segmentation",
-        "burned area mapping multispectral",
-        "remote sensing fire smoke deep learning",
-    ]
-    base.extend(config.get("research", {}).get("core_keywords") or [])
     research_cfg = config.get("research", {}) if isinstance(config, dict) else {}
+    explicit = research_cfg.get("search_queries") if isinstance(research_cfg.get("search_queries"), list) else []
+    core = [str(value).strip() for value in research_cfg.get("core_keywords") or [] if str(value).strip()]
+    methods = [str(value).strip() for value in research_cfg.get("method_keywords") or [] if str(value).strip()]
+    cross = [str(value).strip() for value in research_cfg.get("cross_domain_interests") or [] if str(value).strip()]
+    base = [*explicit, *core]
+    for topic in core[:4]:
+        base.extend(f"{topic} {method}" for method in methods[:2] if method.casefold() not in topic.casefold())
+        base.extend(f"{topic} {interest}" for interest in cross[:1] if interest.casefold() not in topic.casefold())
     weights = profile.get("topic_weights") if isinstance(profile, dict) else None
     if research_cfg.get("use_profile_weights") is True and isinstance(weights, dict):
         for k, v in sorted(weights.items(), key=lambda kv: -float(kv[1] or 0))[:4]:
@@ -417,7 +639,7 @@ def build_queries(config: dict[str, Any], profile: dict[str, Any], feedback: dic
         q = normalize_title(str(q))
         if q and q.lower() not in [x.lower() for x in cleaned]:
             cleaned.append(q)
-    return cleaned[:10]
+    return cleaned[:16]
 
 def source_url(paper: dict[str, Any]) -> str:
     if paper.get("doi"):
@@ -434,15 +656,51 @@ def source_label(paper: dict[str, Any]) -> str:
     folded = raw.casefold()
     if paper.get("arxiv_id") or "arxiv" in folded:
         return "arXiv"
-    if paper.get("doi") or "crossref" in folded:
-        return "DOI / Crossref"
+    if "openalex" in folded:
+        return "OpenAlex"
     if "semantic" in folded:
         return "Semantic Scholar"
+    if "dblp" in folded:
+        return "DBLP"
+    if "openreview" in folded:
+        return "OpenReview"
+    if "scopus" in folded:
+        return "Scopus"
+    if "google_scholar" in folded:
+        return "Google Scholar"
+    if "crossref" in folded:
+        return "Crossref"
+    if paper.get("doi"):
+        return "DOI"
     if raw.startswith("http://") or raw.startswith("https://"):
         return "公开学术来源"
     if not raw or raw.startswith("existing:") or raw.endswith(".json"):
         return "历史学术候选库"
     return raw.replace("_", " ")
+
+
+def select_source_diverse(candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Prefer source breadth among similarly strong papers, without source quotas."""
+    remaining = list(candidates)
+    selected: list[dict[str, Any]] = []
+    covered: set[str] = set()
+    while remaining and len(selected) < max(1, limit):
+        best_score = float(remaining[0].get("filter_score") or 0)
+        near_top = [paper for paper in remaining if float(paper.get("filter_score") or 0) >= best_score - 1.0]
+        paper = max(
+            near_top,
+            key=lambda item: (
+                len(set(item.get("discovery_sources") or [item.get("source")]) - covered),
+                len(item.get("discovery_sources") or []),
+                float(item.get("filter_score") or 0),
+                _published_date(item) or dt.date.min,
+                len(str(item.get("abstract") or "")),
+            ),
+        )
+        selected.append(paper)
+        covered.update(str(value) for value in (paper.get("discovery_sources") or [paper.get("source")]) if value)
+        remaining.remove(paper)
+    return selected
 
 
 def sentence_excerpt(value: Any, limit: int = 900) -> str:
@@ -1242,32 +1500,42 @@ def main() -> int:
         candidates.extend(existing)
         log_event(run_log, type="existing_candidates", count=len(existing))
 
-        # Search every built query, not just the first five: build_queries appends the
-        # direction-specific strings ("wildfire smoke satellite segmentation" etc.) after the
-        # config keywords, and the old queries[:5] slice silently discarded exactly those.
-        # max_each=4 only ever exposed the four newest hits per query, so genuinely new work
-        # (e.g. 2609.16199 Sentinel-2 active-fire benchmark, 2609.25731 EO wildfire-disturbance
-        # embeddings) never entered the pool while the newest four were off-topic. Widen the
-        # window; the direction gate and dedup prune what comes back.
         search_cfg = config.get("search") if isinstance(config.get("search"), dict) else {}
-        source_names = search_cfg.get("sources") if isinstance(search_cfg.get("sources"), list) else ["arxiv", "crossref"]
+        source_names = search_cfg.get("sources") if isinstance(search_cfg.get("sources"), list) else ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"]
         sources = {str(value).strip().casefold().replace("-", "_") for value in source_names if str(value).strip()}
-        if "arxiv" in sources:
-            arxiv = arxiv_search(queries[:10], max_each=15)
-            candidates.extend(arxiv)
-            log_event(run_log, type="arxiv_api_candidates", count=len(arxiv))
-        if "crossref" in sources:
-            crossref = crossref_search(queries[:8], max_each=8)
-            candidates.extend(crossref)
-            log_event(run_log, type="crossref_api_candidates", count=len(crossref))
+        query_window = queries[:8]
+        if "openalex" in sources:
+            records = openalex_search(query_window, max_each=8, api_key_env=str(search_cfg.get("openalex_api_key_env") or "OPENALEX_API_KEY"))
+            candidates.extend(records)
+            log_event(run_log, type="openalex_api_candidates", count=len(records))
         if "semantic_scholar" in sources:
-            semantic = semantic_scholar_search(
-                queries[:8],
-                max_each=8,
-                api_key_env=str(search_cfg.get("semantic_scholar_api_key_env") or "SEMANTIC_SCHOLAR_API_KEY"),
-            )
-            candidates.extend(semantic)
-            log_event(run_log, type="semantic_scholar_api_candidates", count=len(semantic))
+            records = semantic_scholar_search(query_window, max_each=8, api_key_env=str(search_cfg.get("semantic_scholar_api_key_env") or "SEMANTIC_SCHOLAR_API_KEY"))
+            candidates.extend(records)
+            log_event(run_log, type="semantic_scholar_api_candidates", count=len(records))
+        if "crossref" in sources:
+            records = crossref_search(query_window, max_each=8)
+            candidates.extend(records)
+            log_event(run_log, type="crossref_api_candidates", count=len(records))
+        if "arxiv" in sources:
+            records = arxiv_search(query_window, max_each=8)
+            candidates.extend(records)
+            log_event(run_log, type="arxiv_api_candidates", count=len(records))
+        if "dblp" in sources:
+            records = dblp_search(query_window, max_each=8)
+            candidates.extend(records)
+            log_event(run_log, type="dblp_api_candidates", count=len(records))
+        if "openreview" in sources:
+            records = openreview_search(query_window, max_each=8)
+            candidates.extend(records)
+            log_event(run_log, type="openreview_api_candidates", count=len(records))
+        if "scopus" in sources:
+            records = scopus_search(query_window, max_each=8, api_key_env=str(search_cfg.get("scopus_api_key_env") or "SCOPUS_API_KEY"), insttoken_env=str(search_cfg.get("scopus_insttoken_env") or "SCOPUS_INSTTOKEN"))
+            candidates.extend(records)
+            log_event(run_log, type="scopus_api_candidates", count=len(records))
+        if "google_scholar" in sources:
+            records = google_scholar_search(query_window, max_each=8, api_key_env=str(search_cfg.get("google_scholar_api_key_env") or "SERPAPI_API_KEY"))
+            candidates.extend(records)
+            log_event(run_log, type="google_scholar_api_candidates", count=len(records))
 
         raw_count = len(candidates)
         candidates = dedup_candidates(candidates)
@@ -1338,7 +1606,7 @@ def main() -> int:
             ),
             reverse=True,
         )
-        selected = filtered[: max(1, args.max_selected)]
+        selected = select_source_diverse(filtered, args.max_selected)
 
         stats = {
             "raw_candidates": raw_count,
@@ -1350,6 +1618,7 @@ def main() -> int:
             "off_direction_rejected": len(off_direction),
             "future_dated_rejected": len(future_dated),
             "queries": len(queries),
+            "selected_discovery_sources": sorted({source for paper in selected for source in (paper.get("discovery_sources") or [paper.get("source")]) if source}),
         }
 
         # Update dedup.json with newly selected papers for cross-week dedup
