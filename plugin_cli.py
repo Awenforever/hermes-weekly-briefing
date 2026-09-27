@@ -260,15 +260,21 @@ def _agently_env(config: dict | None = None) -> dict[str, str]:
         current = config if isinstance(config, dict) else _load_config()
         delivery = current.get("delivery") if isinstance(current.get("delivery"), dict) else {}
         env["AGENTLY_WORKSPACE"] = str(delivery.get("agently_workspace") or "hermes").strip()
+    # Agently also auto-detects HERMES_SESSION_ID.  A transient chat/session id must
+    # not override the stable workspace selected above or each invocation appears
+    # to need a fresh OAuth login.
+    env.pop("HERMES_SESSION_ID", None)
     return env
 
 
 def _mail_status(probe: bool = True) -> dict:
     cli = _find_agently_cli()
+    agently_env = _agently_env()
     result = {
         "installed": bool(cli),
         "authenticated": False,
         "cli": cli,
+        "workspace": agently_env.get("AGENTLY_WORKSPACE"),
         "install_package": "@tencent-qqmail/agently-cli",
     }
     if not cli or not probe:
@@ -276,11 +282,12 @@ def _mail_status(probe: bool = True) -> dict:
     try:
         check = subprocess.run(
             _portable_command(cli, "+me"), text=True, capture_output=True,
-            timeout=30, check=False, env=_agently_env(),
+            timeout=30, check=False, env=agently_env,
         )
         result["authenticated"] = check.returncode == 0
         if check.returncode:
-            result["diagnostic"] = "login required or identity probe failed"
+            detail = "\n".join(part.strip() for part in (check.stdout, check.stderr) if part.strip()) or "identity probe failed"
+            result["diagnostic"] = detail[-500:]
     except Exception as exc:
         result["diagnostic"] = str(exc)
     return result

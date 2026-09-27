@@ -1067,6 +1067,7 @@ def run_cmd(cmd: list[str], timeout: int = 90, cwd: Path | None = None) -> dict[
         **os.environ,
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
     }
+    env.pop("HERMES_SESSION_ID", None)
     try:
         portable_cmd = cmd
         if os.name == "nt" and cmd and Path(cmd[0]).suffix.casefold() in {".cmd", ".bat"}:

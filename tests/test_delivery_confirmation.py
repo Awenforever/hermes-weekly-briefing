@@ -20,11 +20,12 @@ SPEC.loader.exec_module(runner)
 class DeliveryConfirmationTests(unittest.TestCase):
     def test_command_preserves_selected_agently_workspace(self):
         completed = mock.Mock(returncode=0, stdout="{}", stderr="")
-        with mock.patch.dict(os.environ, {"AGENTLY_WORKSPACE": "hermes"}, clear=False), mock.patch.object(
+        with mock.patch.dict(os.environ, {"AGENTLY_WORKSPACE": "hermes", "HERMES_SESSION_ID": "transient"}, clear=False), mock.patch.object(
             runner.subprocess, "run", return_value=completed
         ) as run:
             runner.run_cmd(["agently-cli", "+me"])
         self.assertEqual("hermes", run.call_args.kwargs["env"]["AGENTLY_WORKSPACE"])
+        self.assertNotIn("HERMES_SESSION_ID", run.call_args.kwargs["env"])
 
     def test_successful_prepare_response_is_confirmed_before_sent(self):
         prepared = {

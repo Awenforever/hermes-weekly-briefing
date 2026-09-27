@@ -21,10 +21,11 @@ class ScheduleTests(unittest.TestCase):
         with mock.patch.object(plugin, "_find_agently_cli", return_value="/bin/agently-cli"), mock.patch.object(
             plugin, "_load_config", return_value={}
         ), mock.patch.object(plugin.subprocess, "run", return_value=completed) as run, mock.patch.dict(
-            plugin.os.environ, {}, clear=True
+            plugin.os.environ, {"HERMES_SESSION_ID": "transient"}, clear=True
         ):
             self.assertTrue(plugin._mail_status()["authenticated"])
         self.assertEqual("hermes", run.call_args.kwargs["env"]["AGENTLY_WORKSPACE"])
+        self.assertNotIn("HERMES_SESSION_ID", run.call_args.kwargs["env"])
 
     def test_run_respects_explicit_isolated_data_directory(self):
         with tempfile.TemporaryDirectory() as raw:
