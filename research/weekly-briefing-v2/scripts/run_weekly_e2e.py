@@ -711,7 +711,7 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
 def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], queries: list[str], out: Path, narrative: dict[str, Any] | None = None) -> str:
     narrative = narrative if isinstance(narrative, dict) else {}
     def esc(value: Any) -> str:
-        return html.escape(str(value or ""))
+        return html.escape("" if value is None else str(value))
     papers = []
     for index, paper in enumerate(selected, 1):
         url = source_url(paper)
@@ -796,7 +796,22 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
         + ''.join(method_cards) + '</div><table><thead><tr><th>论文</th><th>研究问题</th><th>关键证据</th><th>需核验点</th></tr></thead><tbody>'
         + ''.join(synthesis_rows) + '</tbody></table></section>'
     ) if selected else ''
-    stats_html = ''.join(f'<div class="stat"><b>{esc(v)}</b><span>{esc(k)}</span></div>' for k, v in stats.items())
+    stat_labels = {
+        "raw_candidates": "候选总数",
+        "candidate_deduped": "候选去重后",
+        "cross_week_deduped": "跨周去重",
+        "hard_filter_passed": "严格筛选通过",
+        "selected_count": "本期入选",
+        "rejected_count": "筛除总数",
+        "off_direction_rejected": "偏离主题筛除",
+        "future_dated_rejected": "未来日期筛除",
+        "queries": "检索式",
+        "deep_analysis_count": "深度分析",
+    }
+    stats_html = ''.join(
+        f'<div class="stat" data-stat-key="{esc(k)}"><b>{esc(v)}</b><span>{esc(stat_labels.get(k, k))}</span></div>'
+        for k, v in stats.items()
+    )
     queries_html = ''.join(f'<li>{esc(item)}</li>' for item in queries)
     overview_html = ''
     if narrative.get("discovery_note"):
@@ -843,7 +858,8 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
       .analysis {{ margin:4mm 0; }} .method-tree {{ display:grid; gap:2mm; margin:2mm 0 4mm; }}
       .method-step {{ display:grid; grid-template-columns:42mm 1fr; gap:3mm; background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; border-radius:1.5mm; }}
       .method-step span {{ color:#40566d; }} .missing {{ color:#8a5b00; background:#fff7df; padding:3mm; }}
-      .method-step,.team,.author,table,tr {{ break-inside:avoid; page-break-inside:avoid; }}
+      .team,.author-grid {{ break-inside:auto; page-break-inside:auto; }}
+      .method-step,.author,table,tr {{ break-inside:avoid; page-break-inside:avoid; }}
       table {{ width:100%; border-collapse:collapse; margin:2mm 0 4mm; font-size:8.5pt; }} th,td {{ border:1px solid #d5dee5; padding:2.5mm; vertical-align:top; }}
       th {{ background:#eef5f8; text-align:left; color:#234b70; }}
     </style></head><body>
@@ -867,6 +883,8 @@ def validate_report_quality(selected: list[dict[str, Any]], html_text: str) -> d
         errors.append("paper-level keep-together pagination can create heading-only pages")
     if re.search(r"existing:[^<\s]+\.json|\b[\w-]+_arxiv_[\w.-]+\.json\b", html_text, re.I):
         errors.append("internal candidate filename leaked into reader-facing report")
+    if re.search(r'<div class="stat"[^>]*><b>\s*</b>', html_text):
+        errors.append("a cover statistic rendered without a value")
     for index, paper in enumerate(selected, 1):
         analysis = _paper_analysis(paper)
         if not source_url(paper):

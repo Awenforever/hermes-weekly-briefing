@@ -93,7 +93,7 @@ class ReportRendererTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             target = Path(raw)
             papers = self.sample_papers()
-            stats = {"selected_count": 2, "raw_candidates": 18, "cross_week_deduped": 4}
+            stats = {"selected_count": 2, "raw_candidates": 18, "cross_week_deduped": 0}
             queries = ["wildfire smoke satellite segmentation", "multispectral smoke detection"]
             markdown = runner.make_report("2026-W38", papers, stats, target, queries)
             html_path = target / "report.html"
@@ -107,6 +107,9 @@ class ReportRendererTests(unittest.TestCase):
             self.assertIn("https://doi.org/10.1000/smoke", html_text)
             self.assertIn("跨论文方法与证据对比", html_text)
             self.assertNotIn("weixin", html_text.lower())
+            self.assertIn('<b>0</b><span>跨周去重</span>', html_text)
+            self.assertNotIn('<b></b>', html_text)
+            self.assertNotIn('.method-step,.team,.author,table,tr', html_text)
             receipt = runner.validate_report_quality(papers, html_text)
             self.assertTrue(receipt["passed"])
             self.assertEqual(receipt["checks"]["clickable_originals"], 2)
