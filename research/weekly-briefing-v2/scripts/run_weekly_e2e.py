@@ -300,6 +300,7 @@ def semantic_scholar_search(queries: list[str], max_each: int = 5, api_key_env: 
     api_key = str(os.environ.get(api_key_env) or "").strip()
     if api_key:
         headers["x-api-key"] = api_key
+    consecutive_failures = 0
     for query in queries:
         params = urllib.parse.urlencode({
             "query": query,
@@ -314,7 +315,11 @@ def semantic_scholar_search(queries: list[str], max_each: int = 5, api_key_env: 
             with urllib.request.urlopen(req, timeout=25) as response:
                 payload = json.loads(response.read().decode("utf-8", errors="replace"))
         except Exception:
+            consecutive_failures += 1
+            if consecutive_failures >= 2:
+                break
             continue
+        consecutive_failures = 0
         for item in payload.get("data") or []:
             if not isinstance(item, dict):
                 continue
@@ -397,11 +402,16 @@ def openalex_search(
 
 def dblp_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
+    consecutive_failures = 0
     for query in queries:
         params = urllib.parse.urlencode({"q": query, "h": max_each, "format": "json"})
         code, _ctype, text = fetch_url("https://dblp.org/search/publ/api?" + params, timeout=25)
         if code != 200:
+            consecutive_failures += 1
+            if consecutive_failures >= 2:
+                break
             continue
+        consecutive_failures = 0
         try:
             hits = json.loads(text).get("result", {}).get("hits", {}).get("hit", [])
         except Exception:

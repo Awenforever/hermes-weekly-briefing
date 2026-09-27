@@ -80,6 +80,14 @@ class DiscoverySourceTests(unittest.TestCase):
             self.assertEqual([], runner.scopus_search(["topic"], 1))
             self.assertEqual([], runner.google_scholar_search(["topic"], 1))
 
+    def test_unavailable_sources_stop_after_two_consecutive_failures(self):
+        with mock.patch.object(runner, "fetch_url", return_value=(0, "", "timeout")) as fetch:
+            self.assertEqual([], runner.dblp_search(["one", "two", "three"], 1))
+        self.assertEqual(2, fetch.call_count)
+        with mock.patch.object(runner.urllib.request, "urlopen", side_effect=TimeoutError()) as open_url:
+            self.assertEqual([], runner.semantic_scholar_search(["one", "two", "three"], 1))
+        self.assertEqual(2, open_url.call_count)
+
     def test_source_executor_is_bounded_and_keeps_adapter_queries_serial(self):
         source = RUNNER.read_text(encoding="utf-8")
         self.assertIn("ThreadPoolExecutor(max_workers=max(1, min(6, len(discovery_tasks))))", source)
