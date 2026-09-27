@@ -42,6 +42,7 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup = actions.add_parser("setup", help="Inspect or apply guided personal setup")
     setup.add_argument("--email-to", action="append", default=[])
     setup.add_argument("--keyword", action="append", default=[])
+    setup.add_argument("--direction-term", action="append", default=[])
     setup.add_argument("--max-selected", type=int, default=None)
     setup.add_argument("--timezone", default=None)
     setup.add_argument("--schedule", default=None)
@@ -490,6 +491,8 @@ def _configure(args: argparse.Namespace) -> int:
         delivery["email_to"] = [str(value).strip() for value in args.email_to if "@" in str(value)]
     if args.keyword:
         research["core_keywords"] = [str(value).strip() for value in args.keyword if str(value).strip()]
+    if getattr(args, "direction_term", None):
+        research["direction_terms"] = [str(value).strip() for value in args.direction_term if str(value).strip()]
     if args.max_selected is not None:
         config["max_selected"] = max(1, min(10, args.max_selected))
     if args.timezone:
@@ -633,7 +636,7 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
         supplied = any(
             getattr(args, name, None) not in (None, [], "")
             for name in (
-                "email_to", "keyword", "max_selected", "timezone", "schedule", "provider",
+                "email_to", "keyword", "direction_term", "max_selected", "timezone", "schedule", "provider",
                 "model", "fallback_model", "use_profile_weights", "use_user_feedback",
                 "search_source", "semantic_scholar_api_key_env",
                 "openalex_api_key_env", "scopus_api_key_env", "scopus_insttoken_env",

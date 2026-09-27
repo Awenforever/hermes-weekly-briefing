@@ -46,6 +46,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 首次设置会围绕你的真实需求确认：
 
 - 核心研究方向与关键词；
+- 可选的严格方向词（用于排除只碰巧包含相似术语的跨领域结果）；
 - 每期论文数量（默认 5 篇）；
 - 收件邮箱；
 - 每周发送时间与时区；
@@ -88,6 +89,11 @@ hermes weekly-briefing setup \
   --search-source arxiv \
   --search-source dblp \
   --search-source openreview
+
+# 可选：为容易歧义的方向设置严格标题边界；可重复传入
+hermes weekly-briefing setup \
+  --direction-term "wildfire" \
+  --direction-term "smoke detection"
 
 # 可选：使用由 Hermes/系统环境管理的 Semantic Scholar 密钥
 hermes weekly-briefing setup \

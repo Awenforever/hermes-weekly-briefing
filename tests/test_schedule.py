@@ -106,6 +106,7 @@ class ScheduleTests(unittest.TestCase):
             args = argparse.Namespace(
                 email_to=["researcher@example.com"],
                 keyword=["wildfire smoke", "satellite segmentation"],
+                direction_term=["wildfire", "smoke detection"],
                 max_selected=4,
                 timezone="Asia/Shanghai",
                 schedule="30 8 * * 5",
@@ -122,6 +123,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual("30 8 * * 5", config["schedule"]["expression"])
             self.assertEqual("Asia/Shanghai", config["schedule"]["timezone"])
             self.assertTrue(config["research"]["use_user_feedback"])
+            self.assertEqual(["wildfire", "smoke detection"], config["research"]["direction_terms"])
             self.assertEqual("deepseek-flash", config["analysis"]["model"])
 
     def test_setup_requires_a_reachable_academic_search_engine(self):

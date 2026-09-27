@@ -154,6 +154,10 @@ class ReportRendererTests(unittest.TestCase):
         terms = runner.direction_terms(config)
         self.assertEqual(("protein folding", "drug discovery"), terms)
         self.assertTrue(runner.direction_verdict({"title": "Graph Models for Protein Folding"}, terms)[0])
+        self.assertFalse(runner.direction_verdict(
+            {"title": "Sensing Assisted Satellite Backhaul for Massive IoT"},
+            ("satellite remote sensing",),
+        )[0])
 
     def test_dedup_merges_metadata_and_preserves_discovery_provenance(self):
         candidates = [

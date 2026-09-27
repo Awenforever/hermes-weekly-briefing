@@ -98,7 +98,7 @@ def direction_verdict(c: dict[str, Any], terms: tuple[str, ...]) -> tuple[bool, 
             hits.append(term)
             continue
         words = [word for word in re.findall(r"[a-z0-9\u4e00-\u9fff]+", term) if len(word) > 2]
-        if len(words) >= 2 and sum(word in title for word in words) >= 2:
+        if len(words) >= 2 and all(word in title for word in words):
             hits.append(term)
     if not hits:
         return False, "off_direction"
