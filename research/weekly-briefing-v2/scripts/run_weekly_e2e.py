@@ -24,7 +24,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from weekly_analysis_engine import analyze_papers
+from weekly_analysis_engine import analyze_papers, incomplete_analysis_ids
 
 MARKER = "HERMES_WEEKLY_E2E_RUNNER_V1"
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
@@ -1366,17 +1366,25 @@ def main() -> int:
         analysis_path = Path(args.analysis_file) if args.analysis_file else outdir / "analysis.json"
         analysis_payload = read_json(analysis_path, {})
         analysis_cfg = config.get("analysis") if isinstance(config.get("analysis"), dict) else {}
+        analysis_input = [{**paper, "canonical_id": canonical_id(paper)} for paper in selected]
+        cached_analysis_incomplete = incomplete_analysis_ids(analysis_payload, [
+            {
+                "id": paper["canonical_id"],
+                "title": paper.get("title"),
+                "abstract": paper.get("abstract"),
+            }
+            for paper in analysis_input
+        ]) if selected else []
         if (
             selected
-            and not isinstance(analysis_payload.get("papers") if isinstance(analysis_payload, dict) else None, dict)
+            and cached_analysis_incomplete
             and not args.allow_shallow
             and analysis_cfg.get("auto", True) is not False
         ):
-            analysis_input = [{**paper, "canonical_id": canonical_id(paper)} for paper in selected]
             analysis_payload, provenance = analyze_papers(analysis_input, config, HERMES_HOME)
             analysis_payload["provenance"] = provenance
             write_json(analysis_path, analysis_payload)
-            log_event(run_log, type="deep_analysis", **provenance)
+            log_event(run_log, type="deep_analysis", repaired_cached_ids=cached_analysis_incomplete, **provenance)
         missing_analysis = attach_deep_analysis(selected, analysis_payload)
         if missing_analysis and not args.allow_shallow:
             raise RuntimeError(

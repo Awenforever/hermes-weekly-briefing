@@ -77,7 +77,7 @@ def _request_analysis(
     }
 
 
-def _incomplete_ids(result: dict[str, Any], items: list[dict[str, Any]]) -> list[str]:
+def incomplete_analysis_ids(result: dict[str, Any], items: list[dict[str, Any]]) -> list[str]:
     records = result.get("papers") if isinstance(result.get("papers"), dict) else {}
     incomplete: list[str] = []
     for item in items:
@@ -115,11 +115,11 @@ def _request_complete_analysis(
         if attempt == 1:
             merged.update({key: value for key, value in partial.items() if key != "papers"})
         merged["papers"].update(partial.get("papers") or {})
-        missing = _incomplete_ids(merged, items)
+        missing = incomplete_analysis_ids(merged, items)
         if not missing:
             return merged, payload, attempt
         pending = [item for item in items if str(item.get("id") or "") in set(missing)]
-    raise RuntimeError("analysis model omitted or incompletely analyzed ids: " + ", ".join(_incomplete_ids(merged, items)))
+    raise RuntimeError("analysis model omitted or incompletely analyzed ids: " + ", ".join(incomplete_analysis_ids(merged, items)))
 
 
 def analyze_papers(
