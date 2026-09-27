@@ -26,6 +26,17 @@ def _router(call):
     return mock.patch.dict(sys.modules, {"agent": agent, "agent.auxiliary_client": auxiliary})
 
 
+def _record(problem="问题"):
+    return {
+        "problem": problem,
+        "why_it_matters": "价值",
+        "method_steps": [{"name": "步骤", "detail": "摘要依据"}],
+        "evidence": ["摘要未说明"],
+        "comparison": [],
+        "limitations": ["需阅读全文核验"],
+    }
+
+
 class AnalysisEngineTests(unittest.TestCase):
     def test_resolver_prefers_complete_case_insensitive_provider(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -46,7 +57,7 @@ class AnalysisEngineTests(unittest.TestCase):
             (home / "config.yaml").write_text(json.dumps({"custom_providers": [{
                 "name": "USTC", "base_url": "https://llm.example/v1", "api_key": "top-secret", "models": ["qwen3.6-chat"]
             }]}), encoding="utf-8")
-            returned = {"papers": {"title:test": {"problem": "问题", "evidence": ["摘要未说明"]}}}
+            returned = {"papers": {"title:test": _record()}}
             captured = {}
             def call(**kwargs):
                 captured.update(kwargs)
@@ -68,7 +79,7 @@ class AnalysisEngineTests(unittest.TestCase):
             (home / "config.yaml").write_text(json.dumps({"custom_providers": [{
                 "name": "USTC", "base_url": "https://llm.example/v1", "api_key": "secret"
             }]}), encoding="utf-8")
-            returned = {"papers": {"title:test": {"problem": "问题"}}}
+            returned = {"papers": {"title:test": _record()}}
             calls = []
             def call(**kwargs):
                 calls.append(kwargs.get("model"))
@@ -87,6 +98,29 @@ class AnalysisEngineTests(unittest.TestCase):
             self.assertEqual(["profile-main", "profile-fallback"], calls)
             self.assertTrue(provenance["fallback_used"])
             self.assertEqual("profile-fallback", provenance["actual_model"])
+
+    def test_missing_paper_is_retried_and_merged_without_fallback(self):
+        calls = []
+        def call(**kwargs):
+            request = json.loads(kwargs["messages"][1]["content"])
+            calls.append([item["id"] for item in request["papers"]])
+            if len(calls) == 1:
+                payload = {"papers": {"title:one": _record("一")}, "narrative": {"overview": "总览"}}
+            else:
+                payload = {"papers": {"title:two": _record("二")}}
+            kwargs["route_info"]["resolved_model"] = "deepseek-flash"
+            return {"content": json.dumps(payload, ensure_ascii=False)}
+        papers = [
+            {"canonical_id": "title:one", "title": "One", "abstract": "A"},
+            {"canonical_id": "title:two", "title": "Two", "abstract": "B"},
+        ]
+        with _router(call):
+            result, provenance = engine.analyze_papers(papers, {"analysis": {"model": "deepseek-flash", "fallback_model": "qwen"}}, Path("."))
+        self.assertEqual([["title:one", "title:two"], ["title:two"]], calls)
+        self.assertEqual({"title:one", "title:two"}, set(result["papers"]))
+        self.assertEqual("总览", result["narrative"]["overview"])
+        self.assertEqual(2, provenance["analysis_attempts"])
+        self.assertFalse(provenance["fallback_used"])
 
 
 if __name__ == "__main__":

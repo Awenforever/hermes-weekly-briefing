@@ -77,6 +77,51 @@ def _request_analysis(
     }
 
 
+def _incomplete_ids(result: dict[str, Any], items: list[dict[str, Any]]) -> list[str]:
+    records = result.get("papers") if isinstance(result.get("papers"), dict) else {}
+    incomplete: list[str] = []
+    for item in items:
+        paper_id = str(item.get("id") or "")
+        record = records.get(paper_id)
+        if not isinstance(record, dict):
+            incomplete.append(paper_id)
+            continue
+        scalars_ok = all(str(record.get(key) or "").strip() for key in ("problem", "why_it_matters"))
+        lists_ok = all(isinstance(record.get(key), list) and bool(record.get(key)) for key in ("method_steps", "evidence", "limitations"))
+        if not scalars_ok or not lists_ok:
+            incomplete.append(paper_id)
+    return incomplete
+
+
+def _analysis_request(items: list[dict[str, Any]], schema: dict[str, Any], retry: bool = False) -> str:
+    task = "补全上次遗漏或不完整的论文分析；每个给定 id 必须原样作为 papers 的键" if retry else "逐篇生成可核验深度分析；每个给定 id 必须原样作为 papers 的键"
+    return json.dumps({"task": task, "output_schema": schema, "papers": items}, ensure_ascii=False)
+
+
+def _request_complete_analysis(
+    backend: dict[str, Any],
+    model: str,
+    system: str,
+    items: list[dict[str, Any]],
+    schema: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], int]:
+    merged: dict[str, Any] = {"papers": {}}
+    payload: dict[str, Any] = {}
+    pending = list(items)
+    for attempt in range(1, 3):
+        partial, payload = _request_analysis(
+            backend, model, system, _analysis_request(pending, schema, retry=attempt > 1)
+        )
+        if attempt == 1:
+            merged.update({key: value for key, value in partial.items() if key != "papers"})
+        merged["papers"].update(partial.get("papers") or {})
+        missing = _incomplete_ids(merged, items)
+        if not missing:
+            return merged, payload, attempt
+        pending = [item for item in items if str(item.get("id") or "") in set(missing)]
+    raise RuntimeError("analysis model omitted or incompletely analyzed ids: " + ", ".join(_incomplete_ids(merged, items)))
+
+
 def analyze_papers(
     papers: list[dict[str, Any]],
     config: dict[str, Any],
@@ -111,19 +156,15 @@ def analyze_papers(
             }
         }
     }
-    user = json.dumps(
-        {"task": "逐篇生成可核验深度分析", "output_schema": schema, "papers": items},
-        ensure_ascii=False,
-    )
     requested_model = backend["model"]
     fallback_used = False
     try:
-        result, payload = _request_analysis(backend, requested_model, system, user)
+        result, payload, attempts = _request_complete_analysis(backend, requested_model, system, items, schema)
     except Exception:
         fallback_model = str(backend.get("fallback_model") or "").strip()
         if not fallback_model or fallback_model == requested_model:
             raise
-        result, payload = _request_analysis(backend, fallback_model, system, user)
+        result, payload, attempts = _request_complete_analysis(backend, fallback_model, system, items, schema)
         fallback_used = True
     provenance = {
         "provider": str(payload.get("provider") or backend["provider_name"]),
@@ -131,6 +172,7 @@ def analyze_papers(
         "actual_model": str(payload.get("model") or (backend["fallback_model"] if fallback_used else backend["model"])),
         "fallback_model": backend["fallback_model"] or "inherit",
         "fallback_used": fallback_used,
+        "analysis_attempts": attempts,
         "paper_count": len(papers),
     }
     return result, provenance
