@@ -1204,6 +1204,11 @@ def main() -> int:
 
     try:
         config = read_json(DATA_DIR / "config.json", {})
+        delivery_settings = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
+        os.environ.setdefault(
+            "AGENTLY_WORKSPACE",
+            str(delivery_settings.get("agently_workspace") or "hermes").strip(),
+        )
         profile = read_json(PROFILE_DIR / "current.json", {})
         feedback = read_json(PROFILE_DIR / "topic_feedback.json", {})
         dedup = read_json(PAPERS_DIR / "dedup.json", {})

@@ -16,6 +16,16 @@ SPEC.loader.exec_module(plugin)
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_mail_probe_uses_persistent_hermes_workspace(self):
+        completed = argparse.Namespace(returncode=0, stdout='{"ok":true}', stderr="")
+        with mock.patch.object(plugin, "_find_agently_cli", return_value="/bin/agently-cli"), mock.patch.object(
+            plugin, "_load_config", return_value={}
+        ), mock.patch.object(plugin.subprocess, "run", return_value=completed) as run, mock.patch.dict(
+            plugin.os.environ, {}, clear=True
+        ):
+            self.assertTrue(plugin._mail_status()["authenticated"])
+        self.assertEqual("hermes", run.call_args.kwargs["env"]["AGENTLY_WORKSPACE"])
+
     def test_run_respects_explicit_isolated_data_directory(self):
         with tempfile.TemporaryDirectory() as raw:
             isolated = Path(raw) / "acceptance"

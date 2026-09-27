@@ -253,6 +253,16 @@ def _portable_command(executable: str, *arguments: str) -> list[str]:
     return command
 
 
+def _agently_env(config: dict | None = None) -> dict[str, str]:
+    """Keep every Agently probe/login/send in Hermes' persisted workspace."""
+    env = os.environ.copy()
+    if not str(env.get("AGENTLY_WORKSPACE") or "").strip():
+        current = config if isinstance(config, dict) else _load_config()
+        delivery = current.get("delivery") if isinstance(current.get("delivery"), dict) else {}
+        env["AGENTLY_WORKSPACE"] = str(delivery.get("agently_workspace") or "hermes").strip()
+    return env
+
+
 def _mail_status(probe: bool = True) -> dict:
     cli = _find_agently_cli()
     result = {
@@ -264,7 +274,10 @@ def _mail_status(probe: bool = True) -> dict:
     if not cli or not probe:
         return result
     try:
-        check = subprocess.run(_portable_command(cli, "+me"), text=True, capture_output=True, timeout=30, check=False)
+        check = subprocess.run(
+            _portable_command(cli, "+me"), text=True, capture_output=True,
+            timeout=30, check=False, env=_agently_env(),
+        )
         result["authenticated"] = check.returncode == 0
         if check.returncode:
             result["diagnostic"] = "login required or identity probe failed"
@@ -594,7 +607,7 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
         if not cli:
             print("Agently CLI is not installed; run mail-install --yes first", file=sys.stderr)
             return 2
-        return subprocess.run(_portable_command(cli, "auth", "login")).returncode
+        return subprocess.run(_portable_command(cli, "auth", "login"), env=_agently_env()).returncode
     if action == "schedule-install":
         return _install_schedule(args.schedule)
     if action == "schedule-status":
