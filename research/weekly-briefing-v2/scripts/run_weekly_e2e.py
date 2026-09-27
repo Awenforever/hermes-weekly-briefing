@@ -17,6 +17,7 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -1503,39 +1504,41 @@ def main() -> int:
         search_cfg = config.get("search") if isinstance(config.get("search"), dict) else {}
         source_names = search_cfg.get("sources") if isinstance(search_cfg.get("sources"), list) else ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"]
         sources = {str(value).strip().casefold().replace("-", "_") for value in source_names if str(value).strip()}
-        query_window = queries[:8]
+        query_window = queries[:6]
+        discovery_tasks: list[tuple[str, Any, tuple[Any, ...], dict[str, Any]]] = []
         if "openalex" in sources:
-            records = openalex_search(query_window, max_each=8, api_key_env=str(search_cfg.get("openalex_api_key_env") or "OPENALEX_API_KEY"))
-            candidates.extend(records)
-            log_event(run_log, type="openalex_api_candidates", count=len(records))
+            discovery_tasks.append(("openalex_api_candidates", openalex_search, (query_window,), {"max_each": 6, "api_key_env": str(search_cfg.get("openalex_api_key_env") or "OPENALEX_API_KEY")}))
         if "semantic_scholar" in sources:
-            records = semantic_scholar_search(query_window, max_each=8, api_key_env=str(search_cfg.get("semantic_scholar_api_key_env") or "SEMANTIC_SCHOLAR_API_KEY"))
-            candidates.extend(records)
-            log_event(run_log, type="semantic_scholar_api_candidates", count=len(records))
+            discovery_tasks.append(("semantic_scholar_api_candidates", semantic_scholar_search, (query_window,), {"max_each": 6, "api_key_env": str(search_cfg.get("semantic_scholar_api_key_env") or "SEMANTIC_SCHOLAR_API_KEY")}))
         if "crossref" in sources:
-            records = crossref_search(query_window, max_each=8)
-            candidates.extend(records)
-            log_event(run_log, type="crossref_api_candidates", count=len(records))
+            discovery_tasks.append(("crossref_api_candidates", crossref_search, (query_window,), {"max_each": 6}))
         if "arxiv" in sources:
-            records = arxiv_search(query_window, max_each=8)
-            candidates.extend(records)
-            log_event(run_log, type="arxiv_api_candidates", count=len(records))
+            discovery_tasks.append(("arxiv_api_candidates", arxiv_search, (query_window,), {"max_each": 6}))
         if "dblp" in sources:
-            records = dblp_search(query_window, max_each=8)
-            candidates.extend(records)
-            log_event(run_log, type="dblp_api_candidates", count=len(records))
+            discovery_tasks.append(("dblp_api_candidates", dblp_search, (query_window,), {"max_each": 6}))
         if "openreview" in sources:
-            records = openreview_search(query_window, max_each=8)
-            candidates.extend(records)
-            log_event(run_log, type="openreview_api_candidates", count=len(records))
+            discovery_tasks.append(("openreview_api_candidates", openreview_search, (query_window,), {"max_each": 6}))
         if "scopus" in sources:
-            records = scopus_search(query_window, max_each=8, api_key_env=str(search_cfg.get("scopus_api_key_env") or "SCOPUS_API_KEY"), insttoken_env=str(search_cfg.get("scopus_insttoken_env") or "SCOPUS_INSTTOKEN"))
-            candidates.extend(records)
-            log_event(run_log, type="scopus_api_candidates", count=len(records))
+            discovery_tasks.append(("scopus_api_candidates", scopus_search, (query_window,), {"max_each": 6, "api_key_env": str(search_cfg.get("scopus_api_key_env") or "SCOPUS_API_KEY"), "insttoken_env": str(search_cfg.get("scopus_insttoken_env") or "SCOPUS_INSTTOKEN")}))
         if "google_scholar" in sources:
-            records = google_scholar_search(query_window, max_each=8, api_key_env=str(search_cfg.get("google_scholar_api_key_env") or "SERPAPI_API_KEY"))
-            candidates.extend(records)
-            log_event(run_log, type="google_scholar_api_candidates", count=len(records))
+            discovery_tasks.append(("google_scholar_api_candidates", google_scholar_search, (query_window,), {"max_each": 6, "api_key_env": str(search_cfg.get("google_scholar_api_key_env") or "SERPAPI_API_KEY")}))
+
+        # Sources are independent failure domains.  Run one bounded worker per
+        # configured source while keeping each adapter's own query loop serial,
+        # which avoids both N×timeout latency and bursty per-provider traffic.
+        with ThreadPoolExecutor(max_workers=max(1, min(6, len(discovery_tasks)))) as pool:
+            pending = {
+                pool.submit(function, *arguments, **keywords): event_type
+                for event_type, function, arguments, keywords in discovery_tasks
+            }
+            for future in as_completed(pending):
+                event_type = pending[future]
+                try:
+                    records = future.result()
+                    candidates.extend(records)
+                    log_event(run_log, type=event_type, count=len(records))
+                except Exception as exc:
+                    log_event(run_log, type=event_type, count=0, error=repr(exc)[:500])
 
         raw_count = len(candidates)
         candidates = dedup_candidates(candidates)

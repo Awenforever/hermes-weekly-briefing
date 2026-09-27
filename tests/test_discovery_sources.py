@@ -80,6 +80,12 @@ class DiscoverySourceTests(unittest.TestCase):
             self.assertEqual([], runner.scopus_search(["topic"], 1))
             self.assertEqual([], runner.google_scholar_search(["topic"], 1))
 
+    def test_source_executor_is_bounded_and_keeps_adapter_queries_serial(self):
+        source = RUNNER.read_text(encoding="utf-8")
+        self.assertIn("ThreadPoolExecutor(max_workers=max(1, min(6, len(discovery_tasks))))", source)
+        self.assertIn("query_window = queries[:6]", source)
+        self.assertIn("for query in queries:", source)
+
 
 if __name__ == "__main__":
     unittest.main()
