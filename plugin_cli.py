@@ -64,6 +64,7 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     run.add_argument("--send-email", action="store_true")
     run.add_argument("--max-selected", type=int, default=None)
     run.add_argument("--week", default=None)
+    run.add_argument("--data-dir", default=None, help=argparse.SUPPRESS)
     run.add_argument("--analysis-file", default=None)
     run.add_argument("--allow-shallow", action="store_true")
     schedule = actions.add_parser("schedule-install", help="Install or repair the email-only weekly schedule")
@@ -76,7 +77,9 @@ def _run(args: argparse.Namespace) -> int:
     script = _root() / "research" / "weekly-briefing-v2" / "scripts" / "run_weekly_e2e.py"
     config = _load_config()
     configured_max = int(config.get("max_selected") or 5) if config else 5
-    command = [sys.executable, str(script), "--data-dir", str(_data()), "--max-selected", str(args.max_selected or configured_max)]
+    requested_data = str(args.data_dir or os.environ.get("HERMES_WEEKLY_DATA_DIR") or _data()).strip()
+    data_dir = Path(requested_data).expanduser().resolve()
+    command = [sys.executable, str(script), "--data-dir", str(data_dir), "--max-selected", str(args.max_selected or configured_max)]
     if args.week:
         command.extend(["--week", args.week])
     if args.analysis_file:
@@ -88,7 +91,7 @@ def _run(args: argparse.Namespace) -> int:
     if args.send_email:
         command.append("--send-email")
     env = os.environ.copy()
-    env["HERMES_WEEKLY_DATA_DIR"] = str(_data())
+    env["HERMES_WEEKLY_DATA_DIR"] = str(data_dir)
     return subprocess.run(command, env=env).returncode
 
 

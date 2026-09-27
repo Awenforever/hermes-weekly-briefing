@@ -16,6 +16,24 @@ SPEC.loader.exec_module(plugin)
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_run_respects_explicit_isolated_data_directory(self):
+        with tempfile.TemporaryDirectory() as raw:
+            isolated = Path(raw) / "acceptance"
+            args = argparse.Namespace(
+                data_dir=str(isolated), max_selected=2, week="2026-W39-C01",
+                analysis_file=None, allow_shallow=False, email_to=[], send_email=False,
+            )
+            completed = argparse.Namespace(returncode=0)
+            with mock.patch.object(plugin, "_load_config", return_value={"max_selected": 5}), mock.patch.object(
+                plugin.subprocess, "run", return_value=completed
+            ) as run:
+                self.assertEqual(0, plugin._run(args))
+            command = run.call_args.args[0]
+            env = run.call_args.kwargs["env"]
+            resolved = str(isolated.resolve())
+            self.assertEqual(resolved, command[command.index("--data-dir") + 1])
+            self.assertEqual(resolved, env["HERMES_WEEKLY_DATA_DIR"])
+
     def test_existing_agent_job_is_repaired_in_place(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
