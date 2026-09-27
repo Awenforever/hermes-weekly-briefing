@@ -428,6 +428,38 @@ def source_url(paper: dict[str, Any]) -> str:
     return value if value.startswith(("https://", "http://")) else ""
 
 
+def source_label(paper: dict[str, Any]) -> str:
+    """Return a reader-facing provenance label, never an internal cache filename."""
+    raw = str(paper.get("source") or "").strip()
+    folded = raw.casefold()
+    if paper.get("arxiv_id") or "arxiv" in folded:
+        return "arXiv"
+    if paper.get("doi") or "crossref" in folded:
+        return "DOI / Crossref"
+    if "semantic" in folded:
+        return "Semantic Scholar"
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return "公开学术来源"
+    if not raw or raw.startswith("existing:") or raw.endswith(".json"):
+        return "历史学术候选库"
+    return raw.replace("_", " ")
+
+
+def sentence_excerpt(value: Any, limit: int = 900) -> str:
+    """Shorten prose without exposing a broken word or half sentence."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    window = text[: limit + 1]
+    sentence_ends = [m.end() for m in re.finditer(r"(?:[。！？]|[.!?](?=\s|$))", window)]
+    usable = [position for position in sentence_ends if position >= int(limit * 0.55)]
+    if usable:
+        return window[: usable[-1]].strip()
+    words = list(re.finditer(r"\s+", window))
+    cut = words[-1].start() if words else limit
+    return window[:cut].rstrip(" ,;:-") + "…"
+
+
 def _openalex_json(url: str, cache_path: Path) -> dict[str, Any]:
     cached = read_json(cache_path, {})
     if isinstance(cached, dict) and cached.get("cached_at") and isinstance(cached.get("payload"), dict):
@@ -563,7 +595,7 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
         link = source_url(s)
         title = s.get('title', '?')
         lines.append(f"### {i}. [{title}]({link})" if link else f"### {i}. {title}")
-        lines.append(f"- **来源：** {s.get('source', '?')}")
+        lines.append(f"- **来源：** {source_label(s)}")
         if s.get("doi"):
             lines.append(f"- **DOI：** [{s['doi']}](https://doi.org/{s['doi']})")
         if s.get("arxiv_id"):
@@ -599,7 +631,7 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
                 label = f"{recent_title} ({item.get('year') or '年份未知'})"
                 lines.append(f"    - [{label}]({recent_url})" if recent_url.startswith("http") else f"    - {label}")
         if s.get("abstract"):
-            lines.append(f"\n{s['abstract'][:500]}")
+            lines.append(f"\n{sentence_excerpt(s['abstract'], 500)}")
         analysis = _paper_analysis(s)
         if analysis.get("problem"):
             lines.append(f"\n**研究问题：** {analysis['problem']}")
@@ -708,6 +740,13 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
                 + esc(" · ".join(metrics)) + '<br><span>' + esc(" / ".join(author.get("topics") or [])) + '</span>'
                 + (f'<div class="recent"><b>近期研究</b><ul>{"".join(recent_links)}</ul></div>' if recent_links else '') + '</div>'
             )
+        if not author_cards:
+            for author_name in list(paper.get("authors") or [])[:5]:
+                if str(author_name).strip():
+                    author_cards.append(
+                        '<div class="author"><strong>' + esc(author_name)
+                        + '</strong><br><span>论文署名作者；公开学术画像暂不可用</span></div>'
+                    )
         method_steps = []
         for step_index, step in enumerate(list(analysis.get("method_steps") or []), 1):
             if isinstance(step, dict):
@@ -731,12 +770,12 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
           <h3>局限与验证点</h3><ul>{limitation_items or '<li>需阅读原文后确认</li>'}</ul></div>'''
         papers.append(f'''<section class="paper">
           <div class="paper-index">{index:02d}</div><h2>{title_html}</h2>
-          <div class="meta">{esc(paper.get("published"))} · {esc(paper.get("source"))}</div>
-          <p>{esc(str(paper.get("abstract") or "")[:900])}</p>
+          <div class="meta">{esc(paper.get("published"))} · {esc(source_label(paper))}</div>
+          <p class="abstract">{esc(sentence_excerpt(paper.get("abstract"), 900))}</p>
           {analysis_html}
           <div class="team"><h3>作者团队与研究路径</h3>
-            <p><strong>机构：</strong>{esc("、".join(team.get("institutions") or []) or "暂无可靠机构数据")}</p>
-            <p><strong>主题路径：</strong>{esc(" → ".join(team.get("work_topics") or []) or "暂无可靠主题数据")}</p>
+            <p><strong>机构：</strong>{esc("、".join(team.get("institutions") or []) or "公开来源未提供可靠机构信息")}</p>
+            <p><strong>主题路径：</strong>{esc(" → ".join(team.get("work_topics") or []) or "公开来源未提供可靠主题画像")}</p>
             <div class="author-grid">{''.join(author_cards)}</div>
           </div>
           <p class="source"><a href="{esc(url)}">打开论文原文 ↗</a></p>
@@ -792,7 +831,9 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
       .eyebrow {{ color:#0b7285; letter-spacing:2px; font-weight:700; }} .subtitle {{ color:#52657a; font-size:12pt; }}
       .stats {{ display:grid; grid-template-columns:repeat(3,1fr); gap:3mm; margin-top:12mm; }}
       .stat {{ background:#edf6f8; padding:4mm; border-radius:3mm; }} .stat b {{ display:block; font-size:18pt; color:#0b7285; }} .stat span {{ color:#52657a; font-size:8pt; }}
-      .paper {{ position:relative; page-break-inside:avoid; border-top:1px solid #cbd5e1; padding:7mm 0 5mm 13mm; }}
+      h1,h2,h3 {{ break-after:avoid; page-break-after:avoid; }}
+      .papers-title {{ margin-bottom:5mm; }}
+      .paper {{ position:relative; break-inside:auto; page-break-inside:auto; border-top:1px solid #cbd5e1; padding:7mm 0 5mm 13mm; }}
       .paper-index {{ position:absolute; left:0; top:7mm; color:#0b7285; font-weight:800; font-size:10pt; }}
       .meta,.source {{ color:#64748b; font-size:8.5pt; }} .team {{ background:#f6f8fb; border-left:3px solid #4f86a6; padding:4mm; border-radius:1mm; }}
       .author-grid {{ display:grid; grid-template-columns:repeat(3,1fr); gap:2mm; }} .author {{ background:white; padding:3mm; font-size:8pt; border:1px solid #dce4ea; border-radius:2mm; }}
@@ -802,18 +843,61 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
       .analysis {{ margin:4mm 0; }} .method-tree {{ display:grid; gap:2mm; margin:2mm 0 4mm; }}
       .method-step {{ display:grid; grid-template-columns:42mm 1fr; gap:3mm; background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; border-radius:1.5mm; }}
       .method-step span {{ color:#40566d; }} .missing {{ color:#8a5b00; background:#fff7df; padding:3mm; }}
+      .method-step,.team,.author,table,tr {{ break-inside:avoid; page-break-inside:avoid; }}
       table {{ width:100%; border-collapse:collapse; margin:2mm 0 4mm; font-size:8.5pt; }} th,td {{ border:1px solid #d5dee5; padding:2.5mm; vertical-align:top; }}
       th {{ background:#eef5f8; text-align:left; color:#234b70; }}
     </style></head><body>
       <section class="cover"><div class="eyebrow">HERMES RESEARCH BRIEFING</div><h1>学术研究周报<br>{esc(week)}</h1>
       <p class="subtitle">论文证据、作者团队与研究路径的一体化阅读稿</p><div class="stats">{stats_html}</div></section>
       {overview_html}
-      <h1>本期论文</h1>{''.join(papers)}{synthesis_html}{tail_html}
+      <h1 class="papers-title">本期论文</h1>{''.join(papers)}{synthesis_html}{tail_html}
       <section class="focus"><h1>持续关注</h1><p class="note">本节只展示固定配置和显式用户反馈形成的检索词。本期报告不会自动改写下周主题，避免关注点自我强化和漂移。</p><ul>{queries_html}</ul>
       <p class="meta">作者与团队指标来自 OpenAlex，表示数据库收录与引用情况，不等同于主观排名。</p></section>
     </body></html>'''
     out.write_text(document, encoding="utf-8")
     return document
+
+
+def validate_report_quality(selected: list[dict[str, Any]], html_text: str) -> dict[str, Any]:
+    """Fail closed on editorial defects that previously reached the user's inbox."""
+    errors: list[str] = []
+    if not selected:
+        return {"passed": True, "checks": {"selected": 0}, "errors": []}
+    if "page-break-inside:avoid; border-top" in html_text:
+        errors.append("paper-level keep-together pagination can create heading-only pages")
+    if re.search(r"existing:[^<\s]+\.json|\b[\w-]+_arxiv_[\w.-]+\.json\b", html_text, re.I):
+        errors.append("internal candidate filename leaked into reader-facing report")
+    for index, paper in enumerate(selected, 1):
+        analysis = _paper_analysis(paper)
+        if not source_url(paper):
+            errors.append(f"paper {index} has no clickable original source")
+        if not str(paper.get("abstract") or "").strip():
+            errors.append(f"paper {index} has no abstract")
+        if not all(analysis.get(key) for key in ("problem", "why_it_matters", "method_steps", "evidence", "limitations")):
+            errors.append(f"paper {index} deep analysis is incomplete")
+        team = paper.get("team_profile") if isinstance(paper.get("team_profile"), dict) else {}
+        if not list(team.get("authors") or []) and not list(paper.get("authors") or []):
+            errors.append(f"paper {index} has no author identity")
+        original = source_url(paper)
+        if original and html.escape(original, quote=True) not in html_text:
+            errors.append(f"paper {index} original link is absent from HTML")
+    receipt = {
+        "passed": not errors,
+        "checks": {
+            "selected": len(selected),
+            "clickable_originals": sum(1 for paper in selected if source_url(paper)),
+            "author_identified": sum(
+                1 for paper in selected
+                if list((paper.get("team_profile") or {}).get("authors") or []) or list(paper.get("authors") or [])
+            ),
+            "pagination_policy": "flowing_papers_with_atomic_components",
+            "internal_source_names_hidden": True,
+        },
+        "errors": errors,
+    }
+    if errors:
+        raise RuntimeError("report quality gate failed: " + "; ".join(errors))
+    return receipt
 
 
 def make_pdf(html_text: str, md: str, out: Path) -> None:
@@ -1296,13 +1380,29 @@ def main() -> int:
         stats["deep_analysis_count"] = len(selected) - len(missing_analysis)
         narrative = analysis_payload.get("narrative") if isinstance(analysis_payload, dict) and isinstance(analysis_payload.get("narrative"), dict) else {}
         enrich_author_teams(selected)
+        write_json(outdir / "selected_snapshot.json", {
+            "version": 1,
+            "runner": MARKER,
+            "week": week,
+            "generated_at": now_iso(),
+            "queries": queries,
+            "stats": stats,
+            "narrative": narrative,
+            "selected": selected,
+        })
         report_md = make_report(week, selected, stats, outdir, queries, narrative)
         report_md_path = outdir / "report.md"
         report_html_path = outdir / "report.html"
         report_pdf_path = outdir / "report.pdf"
         report_md_path.write_text(report_md, encoding="utf-8")
         report_html = make_report_html(week, selected, stats, queries, report_html_path, narrative)
+        quality_receipt = validate_report_quality(selected, report_html)
         make_pdf(report_html, report_md, report_pdf_path)
+        quality_receipt["pdf_bytes"] = report_pdf_path.stat().st_size
+        quality_receipt["pdf_nonempty"] = report_pdf_path.stat().st_size > 5000
+        if not quality_receipt["pdf_nonempty"]:
+            raise RuntimeError("report quality gate failed: PDF is unexpectedly small")
+        write_json(outdir / "quality_receipt.json", quality_receipt)
 
         delivery_cfg = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
         if str(delivery_cfg.get("channel") or "email").casefold() != "email":
@@ -1351,6 +1451,8 @@ def main() -> int:
                 "markdown": "report.md",
                 "html": "report.html",
                 "pdf": "report.pdf",
+                "selected_snapshot": "selected_snapshot.json",
+                "quality_receipt": "quality_receipt.json",
                 "delivery_receipt": "delivery_receipt.json",
                 "run_log": str(run_log),
             },

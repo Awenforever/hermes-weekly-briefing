@@ -107,6 +107,47 @@ class ReportRendererTests(unittest.TestCase):
             self.assertIn("https://doi.org/10.1000/smoke", html_text)
             self.assertIn("跨论文方法与证据对比", html_text)
             self.assertNotIn("weixin", html_text.lower())
+            receipt = runner.validate_report_quality(papers, html_text)
+            self.assertTrue(receipt["passed"])
+            self.assertEqual(receipt["checks"]["clickable_originals"], 2)
+
+    def test_reader_facing_provenance_and_pagination_policy(self):
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw)
+            papers = self.sample_papers()
+            papers[0]["source"] = "existing:w36_arxiv_raw.json"
+            papers[0]["team_profile"] = {}
+            papers[0]["abstract"] = (
+                "First complete sentence establishes the problem. "
+                + "A long technical explanation continues with evidence and context. " * 40
+            )
+            html_text = runner.make_report_html(
+                "2026-W38", papers, {"selected_count": 2}, ["wildfire smoke"], target / "report.html"
+            )
+            self.assertIn("· arXiv", html_text)
+            self.assertNotIn("w36_arxiv_raw.json", html_text)
+            self.assertIn("论文署名作者；公开学术画像暂不可用", html_text)
+            self.assertIn('.paper { position:relative; break-inside:auto; page-break-inside:auto;', html_text)
+            self.assertNotIn('.paper { position:relative; page-break-inside:avoid;', html_text)
+            excerpt = runner.sentence_excerpt(papers[0]["abstract"], 120)
+            self.assertLessEqual(len(excerpt), 121)
+            self.assertTrue(excerpt.endswith((".", "。", "！", "？", "…")))
+
+    def test_source_labels_never_expose_cache_filenames(self):
+        self.assertEqual(runner.source_label({"arxiv_id": "2307.00104", "source": "existing:w36_arxiv_raw.json"}), "arXiv")
+        self.assertEqual(runner.source_label({"doi": "10.1/example", "source": "cached.json"}), "DOI / Crossref")
+        self.assertEqual(runner.source_label({"source": "existing:legacy.json"}), "历史学术候选库")
+
+    def test_quality_gate_rejects_missing_author_identity(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paper = self.sample_papers()[0]
+            paper["authors"] = []
+            paper["team_profile"] = {}
+            html_text = runner.make_report_html(
+                "2026-W38", [paper], {"selected_count": 1}, ["wildfire smoke"], Path(raw) / "report.html"
+            )
+            with self.assertRaisesRegex(RuntimeError, "no author identity"):
+                runner.validate_report_quality([paper], html_text)
 
 
 if __name__ == "__main__":
