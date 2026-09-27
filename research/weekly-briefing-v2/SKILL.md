@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 安装、个性化配置、运行并通过邮件交付研究论文周报；包含作者团队调研、可点击原文链接和中文 PDF。
-version: 4.4.0
+version: 4.5.0
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver
@@ -33,6 +33,8 @@ related_skills:
    - 未登录时，运行 `mail-login` 并告诉用户这是交互步骤；
    - 绝不要求用户把密码、令牌、Cookie 或 OAuth 验证码发到聊天中；
    - 用户完成交互后运行 `mail-status`，不能仅凭用户按了 Enter 就声称登录成功。
+   - 所有身份检查、登录与发送必须使用同一个持久化 `AGENTLY_WORKSPACE`（默认 `hermes`）；正确工作区已通过身份检查时，禁止重复要求用户登录。
+   - 容器环境必须使用 gateway 的运行用户执行插件命令；禁止用 `root` 刷新普通运行用户的凭据，否则会造成凭据文件属主变化和假性“登录失效”。
 8. 运行 `doctor`。失败时只处理仍未通过的项目，不重复已完成的登录或配置。
 9. 先运行一次不发送的测试；需要发送测试邮件时必须得到用户明确同意。
 10. 只有 `doctor` 全部通过且用户确认后，才运行 `schedule-install`。
@@ -41,7 +43,7 @@ related_skills:
 ## 固定边界
 
 - 只通过邮件交付，不生成或发送微信消息。
-- 每期默认选择 3–5 篇，目标报告长度 6–10 页。
+- 每期默认选择 3–5 篇，目标报告长度 8–14 页，内容多少优先于机械页数。
 - 没有逐篇深度分析时，生产交付必须失败；`--allow-shallow` 仅限调试。
 - “下周关注”只写追踪建议，不得自动修改核心研究方向。
 - 历史画像只有在 `research.use_profile_weights=true` 时才影响排序。
@@ -68,7 +70,9 @@ python3 {skill_dir}/scripts/run_weekly_e2e.py \
 所有运行数据位于当前 profile 的 `plugin-data/hermes-weekly-briefing/`。升级不得覆盖配置、作者缓存、论文库、报告或投递回执。
 
 - 任一论文缺少深度分析：停止生产交付。
+- 模型遗漏论文或关键字段时，先自动重试缺失项；仍不完整时使用 Hermes 配置的备用模型。恢复运行时必须重新校验已有分析缓存，禁止复用半成品。
 - PDF 渲染失败：尝试 ReportLab 降级；仍失败则保留 Markdown，不发送残缺附件。
+- PDF 在发送前必须通过质量门：原文链接、作者身份、深度分析、内部来源名隐藏、封面统计值与非空文件均须通过。
 - 邮件发送失败：保留报告和投递状态，禁止改走微信。
 - Agently 返回 `confirmation_required` 时必须完成确认调用；准备态不得记作已发送。
 - 外部作者数据缺失：明确标记缺失，不臆测。
