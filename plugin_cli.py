@@ -10,7 +10,12 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+
+SUPPORTED_SEARCH_SOURCES = {"arxiv", "crossref", "semantic_scholar"}
 
 
 def _home() -> Path:
@@ -39,6 +44,8 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup.add_argument("--provider", default=None)
     setup.add_argument("--model", default=None)
     setup.add_argument("--fallback-model", default=None)
+    setup.add_argument("--search-source", action="append", default=[])
+    setup.add_argument("--semantic-scholar-api-key-env", default=None)
     setup.add_argument("--use-profile-weights", action=argparse.BooleanOptionalAction, default=None)
     setup.add_argument("--use-user-feedback", action=argparse.BooleanOptionalAction, default=None)
     init = actions.add_parser("init", help="Initialize configuration or migrate legacy Weekly Briefing data")
@@ -48,6 +55,7 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     runtime = actions.add_parser("runtime-install", help="Install the declared PDF runtime dependencies")
     runtime.add_argument("--yes", action="store_true", help="Confirm installation into the active Hermes Python")
     actions.add_parser("mail-status", help="Check Agently CLI installation and login")
+    actions.add_parser("search-status", help="Probe configured academic discovery engines")
     install_mail = actions.add_parser("mail-install", help="Install the supported Agently mail CLI")
     install_mail.add_argument("--yes", action="store_true", help="Confirm the global npm installation")
     actions.add_parser("mail-login", help="Open Agently's interactive login flow")
@@ -132,7 +140,75 @@ def _config_diagnostics() -> list[str]:
     recipients = delivery.get("email_to") if isinstance(delivery.get("email_to"), list) else []
     if not [value for value in recipients if "@" in str(value) and "$" not in str(value)]:
         errors.append("delivery.email_to needs at least one real email address")
+    search = config.get("search") if isinstance(config.get("search"), dict) else {}
+    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["arxiv", "crossref"]
+    sources = {
+        str(value).strip().casefold().replace("-", "_")
+        for value in raw_sources
+        if str(value).strip()
+    }
+    if not sources:
+        errors.append("search.sources needs at least one academic discovery engine")
+    unsupported = sorted(sources - SUPPORTED_SEARCH_SOURCES)
+    if unsupported:
+        errors.append("unsupported academic search sources: " + ", ".join(unsupported))
     return errors
+
+
+def _search_status(config: dict, probe: bool = True) -> dict:
+    search = config.get("search") if isinstance(config.get("search"), dict) else {}
+    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["arxiv", "crossref"]
+    sources = [
+        str(value).strip().casefold().replace("-", "_")
+        for value in raw_sources
+        if str(value).strip()
+    ]
+    probes = {
+        "arxiv": "https://export.arxiv.org/api/query?search_query=all%3Atest&start=0&max_results=1",
+        "crossref": "https://api.crossref.org/works?query=test&rows=1",
+        "semantic_scholar": "https://api.semanticscholar.org/graph/v1/paper/search?query=test&limit=1&fields=title",
+    }
+    details = []
+    for source in sources:
+        item = {"source": source, "supported": source in SUPPORTED_SEARCH_SOURCES, "ready": False}
+        if source not in SUPPORTED_SEARCH_SOURCES:
+            item["diagnostic"] = "unsupported by this plugin version"
+            details.append(item)
+            continue
+        if not probe:
+            item.update({"ready": True, "diagnostic": "configured; live probe skipped"})
+            details.append(item)
+            continue
+        headers = {"User-Agent": "hermes-weekly-briefing/4"}
+        if source == "semantic_scholar":
+            key_env = str(search.get("semantic_scholar_api_key_env") or "SEMANTIC_SCHOLAR_API_KEY").strip()
+            key = str(os.environ.get(key_env) or "").strip()
+            if key:
+                headers["x-api-key"] = key
+            item["credential"] = "configured" if key else "anonymous"
+        try:
+            request = urllib.request.Request(probes[source], headers=headers)
+            with urllib.request.urlopen(request, timeout=10) as response:
+                response.read(1024)
+                item["ready"] = 200 <= int(getattr(response, "status", 200) or 200) < 400
+            item["diagnostic"] = "reachable" if item["ready"] else "unexpected response"
+        except urllib.error.HTTPError as exc:
+            item["diagnostic"] = f"HTTP {exc.code}"
+        except Exception as exc:
+            item["diagnostic"] = str(exc)[:240]
+        details.append(item)
+    ready = [item["source"] for item in details if item.get("ready")]
+    return {
+        "ok": bool(ready),
+        "configured_sources": sources,
+        "ready_sources": ready,
+        "engines": details,
+        "next_action": (
+            "academic discovery is ready"
+            if ready else
+            "configure at least one supported engine (arxiv, crossref, semantic_scholar) and ensure Hermes egress can reach it"
+        ),
+    }
 
 
 def _load_config() -> dict:
@@ -263,6 +339,7 @@ def _doctor_result() -> dict:
     mail = _mail_status()
     model = _model_status(config) if config else {"ready": False, "diagnostic": "configuration missing"}
     renderer = _renderer_status()
+    search = _search_status(config) if config else {"ok": False, "configured_sources": [], "ready_sources": [], "engines": []}
     schedule_cfg = config.get("schedule") if isinstance(config.get("schedule"), dict) else {}
     requested_timezone = str(schedule_cfg.get("timezone") or "").strip()
     profile_timezone = _profile_timezone()
@@ -274,6 +351,8 @@ def _doctor_result() -> dict:
         errors.append("analysis provider is not ready")
     if not renderer["ready"]:
         errors.append("no PDF renderer is available")
+    if not search["ok"]:
+        errors.append("no configured academic search engine is reachable")
     if requested_timezone and requested_timezone != profile_timezone:
         errors.append(
             f"Hermes profile timezone must be {requested_timezone!r} before installing this schedule"
@@ -284,6 +363,7 @@ def _doctor_result() -> dict:
         "mail": mail,
         "analysis": model,
         "renderer": renderer,
+        "academic_search": search,
         "schedule_timezone": {"requested": requested_timezone, "profile": profile_timezone},
     }
 
@@ -292,6 +372,13 @@ def _setup_status() -> dict:
     config = _load_config()
     config_errors = _config_diagnostics()
     mail = _mail_status()
+    search = _search_status(config) if config else {
+        "ok": False,
+        "configured_sources": [],
+        "ready_sources": [],
+        "engines": [],
+        "next_action": "configure at least one supported academic discovery engine",
+    }
     unresolved = []
     if config_errors:
         unresolved.append("personal_preferences")
@@ -299,11 +386,14 @@ def _setup_status() -> dict:
         unresolved.append("agently_install")
     elif not mail["authenticated"]:
         unresolved.append("agently_login")
+    if not search["ok"]:
+        unresolved.append("academic_search")
     return {
         "ok": not unresolved,
         "configured": bool(config) and not config_errors,
         "unresolved": unresolved,
         "mail": mail,
+        "academic_search": search,
         "next_action": (
             "ask the user for research topics, recipient, schedule/timezone and optional model preferences"
             if "personal_preferences" in unresolved else
@@ -311,6 +401,8 @@ def _setup_status() -> dict:
             if "agently_install" in unresolved else
             "run mail-login in the user's interactive terminal and wait for completion"
             if "agently_login" in unresolved else
+            search["next_action"]
+            if "academic_search" in unresolved else
             "run doctor, then offer a manual report test before installing the schedule"
         ),
         "privacy": "Never ask the user to paste a mail password, token, cookie, or OAuth code into chat.",
@@ -329,6 +421,7 @@ def _configure(args: argparse.Namespace) -> int:
     delivery = config.setdefault("delivery", {})
     analysis = config.setdefault("analysis", {})
     schedule = config.setdefault("schedule", {})
+    search = config.setdefault("search", {})
     if args.email_to:
         delivery["email_to"] = [str(value).strip() for value in args.email_to if "@" in str(value)]
     if args.keyword:
@@ -345,6 +438,14 @@ def _configure(args: argparse.Namespace) -> int:
         analysis["model"] = args.model
     if args.fallback_model:
         analysis["fallback_model"] = args.fallback_model
+    if getattr(args, "search_source", None):
+        search["sources"] = list(dict.fromkeys(
+            str(value).strip().casefold().replace("-", "_")
+            for value in args.search_source
+            if str(value).strip()
+        ))
+    if getattr(args, "semantic_scholar_api_key_env", None):
+        search["semantic_scholar_api_key_env"] = str(args.semantic_scholar_api_key_env).strip()
     if args.use_profile_weights is not None:
         research["use_profile_weights"] = args.use_profile_weights
     if args.use_user_feedback is not None:
@@ -378,6 +479,7 @@ def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> 
                 "max_selected": 5,
                 "research": {"core_keywords": clean_keywords, "use_profile_weights": False, "use_user_feedback": False},
                 "analysis": {"auto": True, "provider_name": "hermes", "model": "", "fallback_model": "", "timeout_seconds": 180, "max_tokens": 7000},
+                "search": {"sources": ["arxiv", "crossref"], "semantic_scholar_api_key_env": "SEMANTIC_SCHOLAR_API_KEY"},
                 "delivery": {"channel": "email", "email_to": clean_emails},
                 "schedule": {"expression": "0 2 * * 5", "timezone": "Asia/Shanghai"},
             }
@@ -453,6 +555,7 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
             for name in (
                 "email_to", "keyword", "max_selected", "timezone", "schedule", "provider",
                 "model", "fallback_model", "use_profile_weights", "use_user_feedback",
+                "search_source", "semantic_scholar_api_key_env",
             )
         )
         if supplied:
@@ -469,6 +572,10 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
         result = _mail_status()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["installed"] and result["authenticated"] else 2
+    if action == "search-status":
+        result = _search_status(_load_config())
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["ok"] else 2
     if action == "mail-install":
         if not args.yes:
             print("Refusing a global install without --yes", file=sys.stderr)

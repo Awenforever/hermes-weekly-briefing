@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 安装、个性化配置、运行并通过邮件交付研究论文周报；包含作者团队调研、可点击原文链接和中文 PDF。
-version: 4.2.0
+version: 4.4.0
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver
@@ -23,18 +23,20 @@ related_skills:
    - 每期篇数；
    - 每周发送时间和时区；计划任务使用 Hermes profile 的 IANA 时区，若不一致须先说明影响并征得同意后调整 Hermes 时区；
    - 模型提供方、主模型和备用模型（用户无偏好时保留默认）；
+   - 学术搜索源；优先复用能够实际探测成功的 arXiv、Crossref 或 Semantic Scholar，密钥仍由 Hermes/环境管理；
    - 是否允许画像权重、是否允许明确的用户反馈影响排序。
 4. 使用 `hermes weekly-briefing setup` 的对应参数写入设置。不要要求用户手写 JSON。
-5. 检查 PDF 运行依赖。若 `doctor` 报告缺失，说明将修改当前 Hermes Python 环境，获得同意后运行 `runtime-install --yes`，再重新体检。
-6. 检查 Agently：
+5. 运行 `search-status` 实测学术发现来源；若全部不可用，必须引导用户选择支持的来源并配置网络出口或 Semantic Scholar API Key 环境变量，不能继续安装计划任务。
+6. 检查 PDF 运行依赖。若 `doctor` 报告缺失，说明将修改当前 Hermes Python 环境，获得同意后运行 `runtime-install --yes`，再重新体检。
+7. 检查 Agently：
    - 未安装时，说明将全局安装 `@tencent-qqmail/agently-cli`，获得同意后运行 `mail-install --yes`；
    - 未登录时，运行 `mail-login` 并告诉用户这是交互步骤；
    - 绝不要求用户把密码、令牌、Cookie 或 OAuth 验证码发到聊天中；
    - 用户完成交互后运行 `mail-status`，不能仅凭用户按了 Enter 就声称登录成功。
-7. 运行 `doctor`。失败时只处理仍未通过的项目，不重复已完成的登录或配置。
-8. 先运行一次不发送的测试；需要发送测试邮件时必须得到用户明确同意。
-9. 只有 `doctor` 全部通过且用户确认后，才运行 `schedule-install`。
-10. 最终只报告已验证状态、下次运行时间和数据位置；不得泄露完整邮箱、密钥或认证输出。
+8. 运行 `doctor`。失败时只处理仍未通过的项目，不重复已完成的登录或配置。
+9. 先运行一次不发送的测试；需要发送测试邮件时必须得到用户明确同意。
+10. 只有 `doctor` 全部通过且用户确认后，才运行 `schedule-install`。
+11. 最终只报告已验证状态、下次运行时间和数据位置；不得泄露完整邮箱、密钥或认证输出。
 
 ## 固定边界
 
@@ -68,4 +70,5 @@ python3 {skill_dir}/scripts/run_weekly_e2e.py \
 - 任一论文缺少深度分析：停止生产交付。
 - PDF 渲染失败：尝试 ReportLab 降级；仍失败则保留 Markdown，不发送残缺附件。
 - 邮件发送失败：保留报告和投递状态，禁止改走微信。
+- Agently 返回 `confirmation_required` 时必须完成确认调用；准备态不得记作已发送。
 - 外部作者数据缺失：明确标记缺失，不臆测。

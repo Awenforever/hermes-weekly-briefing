@@ -293,6 +293,53 @@ def crossref_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any
             })
     return out
 
+def semantic_scholar_search(queries: list[str], max_each: int = 5, api_key_env: str = "SEMANTIC_SCHOLAR_API_KEY") -> list[dict[str, Any]]:
+    """Search Semantic Scholar without owning credentials.
+
+    The optional API key remains in Hermes/the host environment; the plugin only
+    selects the environment-variable name from its configuration.
+    """
+    out: list[dict[str, Any]] = []
+    headers = {"User-Agent": "hermes-weekly-briefing/4"}
+    api_key = str(os.environ.get(api_key_env) or "").strip()
+    if api_key:
+        headers["x-api-key"] = api_key
+    for query in queries:
+        params = urllib.parse.urlencode({
+            "query": query,
+            "limit": max_each,
+            "fields": "title,abstract,authors,year,publicationDate,url,externalIds",
+        })
+        req = urllib.request.Request(
+            "https://api.semanticscholar.org/graph/v1/paper/search?" + params,
+            headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=25) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+        except Exception:
+            continue
+        for item in payload.get("data") or []:
+            if not isinstance(item, dict):
+                continue
+            external = item.get("externalIds") if isinstance(item.get("externalIds"), dict) else {}
+            authors = [
+                str(author.get("name") or "").strip()
+                for author in item.get("authors") or []
+                if isinstance(author, dict) and str(author.get("name") or "").strip()
+            ]
+            out.append({
+                "title": str(item.get("title") or "").strip(),
+                "abstract": str(item.get("abstract") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+                "doi": str(external.get("DOI") or "").strip(),
+                "arxiv_id": str(external.get("ArXiv") or "").strip(),
+                "published": str(item.get("publicationDate") or item.get("year") or "").strip(),
+                "authors": authors,
+                "source": "semantic_scholar_api",
+            })
+    return out
+
 def is_paper_like(c: dict[str, Any]) -> tuple[bool, int, list[str]]:
     score = 0
     reasons = []
@@ -976,18 +1023,45 @@ def try_send_email(to: list[str], subject: str, body_path: Path, pdf_path: Path,
         for address in to:
             result = run_cmd([cli, "message", "+send", "--to", address, "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name], timeout=60, cwd=cwd)
             item: dict[str, Any] = {"to": address, "send_result": redacted(result)}
-            if result.get("ok"):
-                item["status"] = "sent"
-            else:
-                stderr = str(result.get("stderr") or "")
-                token_match = re.search(r"confirmation[_\s]?token[:\s]+([a-zA-Z0-9_-]+)", stderr, flags=re.I)
-                if token_match:
-                    token = token_match.group(1)
+            response_payload: dict[str, Any] = {}
+            try:
+                parsed = json.loads(str(result.get("stdout") or "{}"))
+                response_payload = parsed if isinstance(parsed, dict) else {}
+            except (TypeError, ValueError):
+                pass
+            response_data = response_payload.get("data") if isinstance(response_payload.get("data"), dict) else {}
+            confirmation_required = response_data.get("confirmation_required") is True
+            token = str(response_data.get("confirmation_token") or "").strip()
+            if not token:
+                combined = "\n".join((str(result.get("stdout") or ""), str(result.get("stderr") or "")))
+                token_match = re.search(r"confirmation[_\s]?token[\"']?\s*[:=]\s*[\"']?([a-zA-Z0-9_-]+)", combined, flags=re.I)
+                token = token_match.group(1) if token_match else ""
+
+            # Agently deliberately returns rc=0/ok=true for a prepared message
+            # that still needs confirmation.  That state is not delivery.
+            if confirmation_required:
+                if not token:
+                    item["status"] = "confirmation_missing"
+                else:
                     confirm_result = run_cmd([cli, "message", "+send", "--to", address, "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name, "--confirmation-token", token], timeout=60, cwd=cwd)
                     item["confirm_result"] = redacted(confirm_result)
-                    item["status"] = "sent" if confirm_result.get("ok") else "confirm_failed"
-                else:
-                    item["status"] = "send_failed"
+                    confirm_payload: dict[str, Any] = {}
+                    try:
+                        parsed = json.loads(str(confirm_result.get("stdout") or "{}"))
+                        confirm_payload = parsed if isinstance(parsed, dict) else {}
+                    except (TypeError, ValueError):
+                        pass
+                    confirm_data = confirm_payload.get("data") if isinstance(confirm_payload.get("data"), dict) else {}
+                    still_pending = confirm_data.get("confirmation_required") is True
+                    item["status"] = "sent" if confirm_result.get("ok") and not still_pending else "confirm_failed"
+            elif result.get("ok") and response_payload.get("ok", True) is not False:
+                item["status"] = "sent"
+            elif token:
+                confirm_result = run_cmd([cli, "message", "+send", "--to", address, "--subject", subject, "--body-file", body_path.name, "--attachment", pdf_path.name, "--confirmation-token", token], timeout=60, cwd=cwd)
+                item["confirm_result"] = redacted(confirm_result)
+                item["status"] = "sent" if confirm_result.get("ok") else "confirm_failed"
+            else:
+                item["status"] = "send_failed"
             deliveries.append(item)
         rec["deliveries"] = deliveries
         rec["status"] = "sent" if deliveries and all(item["status"] == "sent" for item in deliveries) else "send_failed"
@@ -1066,13 +1140,25 @@ def main() -> int:
         # (e.g. 2609.16199 Sentinel-2 active-fire benchmark, 2609.25731 EO wildfire-disturbance
         # embeddings) never entered the pool while the newest four were off-topic. Widen the
         # window; the direction gate and dedup prune what comes back.
-        arxiv = arxiv_search(queries[:10], max_each=15)
-        candidates.extend(arxiv)
-        log_event(run_log, type="arxiv_api_candidates", count=len(arxiv))
-
-        crossref = crossref_search(queries[:8], max_each=8)
-        candidates.extend(crossref)
-        log_event(run_log, type="crossref_api_candidates", count=len(crossref))
+        search_cfg = config.get("search") if isinstance(config.get("search"), dict) else {}
+        source_names = search_cfg.get("sources") if isinstance(search_cfg.get("sources"), list) else ["arxiv", "crossref"]
+        sources = {str(value).strip().casefold().replace("-", "_") for value in source_names if str(value).strip()}
+        if "arxiv" in sources:
+            arxiv = arxiv_search(queries[:10], max_each=15)
+            candidates.extend(arxiv)
+            log_event(run_log, type="arxiv_api_candidates", count=len(arxiv))
+        if "crossref" in sources:
+            crossref = crossref_search(queries[:8], max_each=8)
+            candidates.extend(crossref)
+            log_event(run_log, type="crossref_api_candidates", count=len(crossref))
+        if "semantic_scholar" in sources:
+            semantic = semantic_scholar_search(
+                queries[:8],
+                max_each=8,
+                api_key_env=str(search_cfg.get("semantic_scholar_api_key_env") or "SEMANTIC_SCHOLAR_API_KEY"),
+            )
+            candidates.extend(semantic)
+            log_event(run_log, type="semantic_scholar_api_candidates", count=len(semantic))
 
         raw_count = len(candidates)
         candidates = dedup_candidates(candidates)

@@ -59,14 +59,14 @@ class ScheduleTests(unittest.TestCase):
     def test_setup_reports_mail_install_then_login_without_guessing_success(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
-            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": False, "authenticated": False, "cli": None, "install_package": "@tencent-qqmail/agently-cli"}):
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": False, "authenticated": False, "cli": None, "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
                 state = plugin._setup_status()
                 self.assertIn("personal_preferences", state["unresolved"])
                 self.assertIn("agently_install", state["unresolved"])
             data = home / "plugin-data" / "hermes-weekly-briefing"
             data.mkdir(parents=True)
             (data / "config.json").write_text('{"research":{"core_keywords":["smoke"]},"delivery":{"channel":"email","email_to":["a@example.com"]}}', encoding="utf-8")
-            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": False, "cli": "/bin/agently-cli", "install_package": "@tencent-qqmail/agently-cli"}):
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": False, "cli": "/bin/agently-cli", "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
                 state = plugin._setup_status()
                 self.assertEqual(["agently_login"], state["unresolved"])
                 self.assertIn("interactive", state["next_action"])
@@ -86,7 +86,7 @@ class ScheduleTests(unittest.TestCase):
                 use_profile_weights=False,
                 use_user_feedback=True,
             )
-            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": False, "authenticated": False, "cli": None, "install_package": "@tencent-qqmail/agently-cli"}):
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": False, "authenticated": False, "cli": None, "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
                 self.assertEqual(0, plugin._configure(args))
             config = __import__("json").loads((home / "plugin-data" / "hermes-weekly-briefing" / "config.json").read_text(encoding="utf-8"))
             self.assertEqual(4, config["max_selected"])
@@ -94,6 +94,21 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual("Asia/Shanghai", config["schedule"]["timezone"])
             self.assertTrue(config["research"]["use_user_feedback"])
             self.assertEqual("deepseek-flash", config["analysis"]["model"])
+
+    def test_setup_requires_a_reachable_academic_search_engine(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            data = home / "plugin-data" / "hermes-weekly-briefing"
+            data.mkdir(parents=True)
+            (data / "config.json").write_text(
+                '{"research":{"core_keywords":["smoke"]},"delivery":{"channel":"email","email_to":["a@example.com"]},"search":{"sources":["arxiv"]}}',
+                encoding="utf-8",
+            )
+            unavailable = {"ok": False, "ready_sources": [], "next_action": "configure an academic search engine"}
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": True}), mock.patch.object(plugin, "_search_status", return_value=unavailable):
+                state = plugin._setup_status()
+            self.assertIn("academic_search", state["unresolved"])
+            self.assertIn("configure", state["next_action"])
 
 
 if __name__ == "__main__":

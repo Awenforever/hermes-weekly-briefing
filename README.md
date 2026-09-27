@@ -13,6 +13,7 @@ Weekly Briefing 会围绕你的研究方向发现并筛选论文，完成基于�
 | 能力 | 你会得到什么 |
 |---|---|
 | 论文发现 | 围绕固定研究主线检索、去重和筛选，而不是追逐泛化热点 |
+| 搜索体检 | 自动发现并实测学术搜索源；不可用时先引导配置，不带病启用计划任务 |
 | 深度解读 | 研究问题、方法步骤、证据、对照、局限与跨论文关系 |
 | 团队画像 | 作者机构、研究主题、代表性工作与研究路径线索 |
 | 精美报告 | 中文 PDF、方法卡片、比较表、作者卡片和可点击原文链接 |
@@ -30,10 +31,11 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 1. 检查旧版数据并安全迁移，不覆盖已有配置和历史报告；
 2. 逐项询问尚未确定的个性化设置，而不是让你手写配置文件；
 3. 检查分析模型、PDF 渲染器与 Agently 邮件工具；
-4. 如缺少 Agently，在征得同意后安装；
-5. 打开 Agently 的交互式登录流程，由你在终端或浏览器中完成授权；
-6. 验证登录状态，生成一份测试周报；
-7. 经你确认后再安装每周计划任务。
+4. 探测 arXiv、Crossref 或 Semantic Scholar，至少确认一个真实可用的学术搜索源；
+5. 如缺少 Agently，在征得同意后安装；
+6. 打开 Agently 的交互式登录流程，由你在终端或浏览器中完成授权；
+7. 验证登录状态，生成一份测试周报；
+8. 经你确认后再安装每周计划任务。
 
 > [!IMPORTANT]
 > 邮件密码、令牌、Cookie 或 OAuth 验证码不应发送给 Hermes。需要人工授权时，Hermes 会明确告诉你在哪个终端或浏览器完成，并在你确认后继续检查。
@@ -47,6 +49,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 - 收件邮箱；
 - 每周发送时间与时区；
 - 可选的分析模型与备用模型（留空时动态继承 Hermes）；
+- 学术搜索源；Semantic Scholar 可选择匿名访问或引用 Hermes 环境中已有的 API Key 变量；
 - 是否允许显式维护的研究画像或用户反馈影响排序。
 
 默认不会让历史周报自己“训练”出新的兴趣。只有你明确开启画像权重或反馈学习后，历史偏好才会参与筛选。
@@ -65,6 +68,27 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 - 作者团队的机构、研究主题、近期工作与影响力线索。
 
 缺失的信息会明确标为“摘要未说明”或“需阅读全文核验”，不会由模型猜测补齐。
+
+## 学术搜索源
+
+Weekly Briefing 当前原生支持 `arxiv`、`crossref` 与 `semantic_scholar`。安装过程不会只检查配置文件里有没有名字，而会实际请求所选服务：至少一个来源可用，`doctor` 才会放行计划任务。
+
+```bash
+# 查看配置来源及实时连通性
+hermes weekly-briefing search-status
+
+# 选择两个无需密钥的来源
+hermes weekly-briefing setup \
+  --search-source arxiv \
+  --search-source crossref
+
+# 可选：使用由 Hermes/系统环境管理的 Semantic Scholar 密钥
+hermes weekly-briefing setup \
+  --search-source semantic_scholar \
+  --semantic-scholar-api-key-env SEMANTIC_SCHOLAR_API_KEY
+```
+
+插件只保存“使用哪个环境变量”的选择，不接管或复制密钥。如果所有来源都不可达，安装引导会停在搜索配置步骤，并说明需要配置来源、网络出口或代理。
 
 ## 交付边界
 
@@ -105,6 +129,8 @@ hermes weekly-briefing mail-login
 ```
 
 `mail-login` 是交互步骤，可能打开浏览器或要求在当前终端确认。插件不会伪造登录成功；只有身份检查真实通过，计划任务才允许安装。
+
+Agently 可能先返回“邮件已准备、等待确认”。Weekly Briefing 会继续完成确认调用；待确认状态不会被记作 `sent`。
 
 首次安装启用后，Hermes 会提示重启 gateway 以加载插件。重启后继续运行 `setup` 即可；已完成的信息会被识别，不会从头再问。
 

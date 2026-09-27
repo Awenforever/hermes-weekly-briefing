@@ -38,9 +38,9 @@
     ]
   },
   "search": {
-    "sources": ["Semantic Scholar", "arXiv", "Exa", "Crossref"],
-    "min_sources_per_run": 2,
-    "fallback_order": ["web_search", "web_extract", "execute_code", "browser"],
+    "sources": ["arxiv", "crossref"],
+    "semantic_scholar_api_key_env": "SEMANTIC_SCHOLAR_API_KEY",
+    "min_sources_per_run": 1,
     "lookback_weeks": 3,
     "citation_spike_threshold_per_week": 15
   },
