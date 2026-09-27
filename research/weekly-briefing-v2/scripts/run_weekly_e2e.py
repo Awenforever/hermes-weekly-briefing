@@ -729,15 +729,16 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
             author_name = esc(author.get("name"))
             author_heading = f'<a href="{esc(author_url)}"><strong>{author_name}</strong></a>' if author_url.startswith("http") else f'<strong>{author_name}</strong>'
             recent_links = []
-            for recent in list(author.get("recent_works") or [])[:3]:
+            for recent in list(author.get("recent_works") or [])[:2]:
                 if not isinstance(recent, dict):
                     continue
                 recent_url = str(recent.get("url") or "")
-                recent_label = esc(str(recent.get("title") or "近期论文") + " · " + str(recent.get("year") or "年份未知"))
+                recent_title = sentence_excerpt(recent.get("title") or "近期论文", 72)
+                recent_label = esc(recent_title + " · " + str(recent.get("year") or "年份未知"))
                 recent_links.append(f'<li><a href="{esc(recent_url)}">{recent_label}</a></li>' if recent_url.startswith("http") else f'<li>{recent_label}</li>')
             author_cards.append(
                 '<div class="author">' + author_heading + '<br>'
-                + esc(" · ".join(metrics)) + '<br><span>' + esc(" / ".join(author.get("topics") or [])) + '</span>'
+                + esc(" · ".join(metrics)) + '<br><span>' + esc(" / ".join(list(author.get("topics") or [])[:3])) + '</span>'
                 + (f'<div class="recent"><b>近期研究</b><ul>{"".join(recent_links)}</ul></div>' if recent_links else '') + '</div>'
             )
         if not author_cards:
@@ -851,7 +852,7 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
       .paper {{ position:relative; break-inside:auto; page-break-inside:auto; border-top:1px solid #cbd5e1; padding:7mm 0 5mm 13mm; }}
       .paper-index {{ position:absolute; left:0; top:7mm; color:#0b7285; font-weight:800; font-size:10pt; }}
       .meta,.source {{ color:#64748b; font-size:8.5pt; }} .team {{ background:#f6f8fb; border-left:3px solid #4f86a6; padding:4mm; border-radius:1mm; }}
-      .author-grid {{ display:grid; grid-template-columns:repeat(3,1fr); gap:2mm; }} .author {{ background:white; padding:3mm; font-size:8pt; border:1px solid #dce4ea; border-radius:2mm; }}
+      .author-grid {{ display:grid; grid-template-columns:repeat(3,1fr); gap:2mm; }} .author {{ background:white; padding:2.5mm; font-size:7.5pt; line-height:1.45; border:1px solid #dce4ea; border-radius:2mm; }}
       .author span {{ color:#52657a; }} .author .recent {{ margin-top:2mm; border-top:1px solid #e2e8f0; padding-top:2mm; }} .author .recent ul {{ margin:1mm 0 0; padding-left:4mm; }}
       .focus,.synthesis {{ page-break-before:always; }} .note {{ padding:4mm; background:#fff7df; border-radius:2mm; color:#66531c; }}
       .synthesis-grid {{ display:grid; grid-template-columns:repeat(2,1fr); gap:3mm; margin-bottom:5mm; }} .synthesis-card {{ background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; }} .synthesis-card b,.synthesis-card span {{ display:block; }} .synthesis-card span {{ color:#40566d; margin-top:1mm; }}
