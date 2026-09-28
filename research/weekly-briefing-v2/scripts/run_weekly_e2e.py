@@ -25,6 +25,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+# PDF packages live in plugin-data rather than Hermes' core environment.  The
+# latter is intentionally reconciled during every Hermes upgrade.
+RUNTIME_PATH_RAW = str(os.environ.get("HERMES_WEEKLY_RUNTIME_PATH") or "").strip()
+RUNTIME_PATH = Path(RUNTIME_PATH_RAW).expanduser() if RUNTIME_PATH_RAW else None
+if RUNTIME_PATH is not None and RUNTIME_PATH.is_dir() and str(RUNTIME_PATH) not in sys.path:
+    sys.path.append(str(RUNTIME_PATH))
+
 from weekly_analysis_engine import analyze_papers, incomplete_analysis_ids
 
 MARKER = "HERMES_WEEKLY_E2E_RUNNER_V1"

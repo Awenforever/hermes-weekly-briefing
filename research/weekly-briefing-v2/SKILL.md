@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 安装、个性化配置、运行并通过邮件交付研究论文周报；包含作者团队调研、可点击原文链接和中文 PDF。
-version: 4.6.1
+version: 4.6.2
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver
@@ -27,7 +27,7 @@ related_skills:
    - 是否允许画像权重、是否允许明确的用户反馈影响排序。
 4. 使用 `hermes weekly-briefing setup` 的对应参数写入设置。不要要求用户手写 JSON。
 5. 运行 `search-status` 实测学术发现来源；若全部不可用，必须引导用户选择支持的来源并配置网络出口或 Semantic Scholar API Key 环境变量，不能继续安装计划任务。
-6. 检查 PDF 运行依赖。若 `doctor` 报告缺失，说明将修改当前 Hermes Python 环境，获得同意后运行 `runtime-install --yes`，再重新体检。
+6. 检查 PDF 运行依赖。若 `doctor` 报告缺失，说明将在插件自己的持久化数据目录安装隔离依赖，获得同意后运行 `runtime-install --yes`，再重新体检。不得把这些依赖装进 Hermes 核心虚拟环境。
 7. 检查 Agently：
    - 未安装时，说明将全局安装 `@tencent-qqmail/agently-cli`，获得同意后运行 `mail-install --yes`；
    - 未登录时，运行 `mail-login` 并告诉用户这是交互步骤；

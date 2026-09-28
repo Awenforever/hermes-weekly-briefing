@@ -30,7 +30,18 @@ class ScheduleTests(unittest.TestCase):
                 self.assertEqual(0, plugin._install_runtime(True))
             command = run.call_args.args[0]
             self.assertEqual(str(uv), command[0])
-            self.assertEqual(["pip", "install", "--python", plugin.sys.executable], command[1:5])
+            self.assertEqual(["pip", "install", "--upgrade", "--target"], command[1:5])
+            self.assertEqual(str(home / "plugin-data" / "hermes-weekly-briefing" / "runtime" / "python"), command[5])
+
+    def test_runtime_is_plugin_owned_and_survives_core_environment_replacement(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            runtime = home / "plugin-data" / "hermes-weekly-briefing" / "runtime" / "python"
+            runtime.mkdir(parents=True)
+            (runtime / "sentinel.txt").write_text("persistent", encoding="utf-8")
+            with mock.patch.object(plugin, "_home", return_value=home):
+                self.assertEqual(runtime, plugin._runtime_path())
+            self.assertEqual("persistent", (runtime / "sentinel.txt").read_text(encoding="utf-8"))
 
     def test_mail_probe_uses_persistent_hermes_workspace(self):
         completed = argparse.Namespace(returncode=0, stdout='{"ok":true}', stderr="")
@@ -51,15 +62,17 @@ class ScheduleTests(unittest.TestCase):
                 analysis_file=None, allow_shallow=False, email_to=[], send_email=False,
             )
             completed = argparse.Namespace(returncode=0)
+            runtime = Path(raw) / "runtime"
             with mock.patch.object(plugin, "_load_config", return_value={"max_selected": 5}), mock.patch.object(
-                plugin.subprocess, "run", return_value=completed
-            ) as run:
+                plugin, "_runtime_path", return_value=runtime
+            ), mock.patch.object(plugin.subprocess, "run", return_value=completed) as run:
                 self.assertEqual(0, plugin._run(args))
             command = run.call_args.args[0]
             env = run.call_args.kwargs["env"]
             resolved = str(isolated.resolve())
             self.assertEqual(resolved, command[command.index("--data-dir") + 1])
             self.assertEqual(resolved, env["HERMES_WEEKLY_DATA_DIR"])
+            self.assertEqual(str(runtime), env["HERMES_WEEKLY_RUNTIME_PATH"])
 
     def test_existing_agent_job_is_repaired_in_place(self):
         with tempfile.TemporaryDirectory() as raw:

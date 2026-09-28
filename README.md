@@ -131,7 +131,7 @@ hermes weekly-briefing setup
 # 完整体检：研究配置、模型、PDF 与邮件登录
 hermes weekly-briefing doctor
 
-# 仅在体检提示缺少 PDF 依赖、且你确认后执行
+# 仅在体检提示缺少 PDF 依赖、且你确认后执行；依赖保存在插件数据目录
 hermes weekly-briefing runtime-install --yes
 
 # 手动生成；加 --send-email 才会投递
@@ -152,6 +152,8 @@ hermes weekly-briefing mail-login
 ```
 
 `mail-login` 是交互步骤，可能打开浏览器或要求在当前终端确认。插件不会伪造登录成功；只有身份检查真实通过，计划任务才允许安装。身份、登录和发送固定使用 Hermes 的持久化 Agently 工作区：`mail-status` 已通过时不会重复要求登录。
+
+PDF 渲染依赖保存在当前 Hermes profile 的 `plugin-data/hermes-weekly-briefing/runtime/`，不会写入或污染 Hermes 核心 Python 环境；升级 Hermes 后也不会被核心依赖同步清除。
 
 在 Docker 中，请让插件命令使用 gateway 的实际运行用户。用 `root` 刷新普通运行用户的 Agently 凭据可能改变文件属主，造成“令牌仍有效但 gateway 无权读取”的假性登录失败。
 

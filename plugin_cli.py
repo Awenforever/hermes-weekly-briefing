@@ -36,6 +36,16 @@ def _data() -> Path:
     return _home() / "plugin-data" / "hermes-weekly-briefing"
 
 
+def _runtime_path() -> Path:
+    """Return the plugin-owned dependency directory.
+
+    Hermes upgrades reconcile the core virtual environment against Hermes'
+    lockfile.  Optional plugin packages therefore belong under plugin-data,
+    which is both persistent and outside that reconciliation boundary.
+    """
+    return _data() / "runtime" / "python"
+
+
 def register_cli(parser: argparse.ArgumentParser) -> None:
     actions = parser.add_subparsers(dest="weekly_action")
     actions.add_parser("status", help="Show data, configuration, and last-report status")
@@ -101,6 +111,7 @@ def _run(args: argparse.Namespace) -> int:
         command.append("--send-email")
     env = os.environ.copy()
     env["HERMES_WEEKLY_DATA_DIR"] = str(data_dir)
+    env["HERMES_WEEKLY_RUNTIME_PATH"] = str(_runtime_path())
     return subprocess.run(command, env=env).returncode
 
 
@@ -365,29 +376,53 @@ def _model_status(config: dict) -> dict:
 
 
 def _renderer_status() -> dict:
-    available = []
-    for module in ("weasyprint", "reportlab"):
-        try:
-            __import__(module)
-            available.append(module)
-        except Exception:
-            pass
-    return {"ready": bool(available), "available": available}
+    runtime = _runtime_path()
+    probe = (
+        "import importlib, json, sys; "
+        f"sys.path.append({str(runtime)!r}); "
+        "result={}; "
+        "exec(\"for name in ('weasyprint','reportlab'):\\n"
+        " try:\\n  importlib.import_module(name); result[name]=True\\n"
+        " except Exception as exc:\\n  result[name]=False\"); "
+        "print(json.dumps(result))"
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", probe], text=True, capture_output=True,
+            timeout=30, check=False,
+        )
+        result = json.loads(completed.stdout) if completed.returncode == 0 else {}
+    except Exception:
+        result = {}
+    available = [name for name in ("weasyprint", "reportlab") if result.get(name)]
+    return {
+        "ready": bool(available),
+        "available": available,
+        "runtime": str(runtime),
+        "isolated": True,
+    }
 
 
 def _install_runtime(confirmed: bool) -> int:
     if not confirmed:
-        print("Refusing to modify the active Python environment without --yes", file=sys.stderr)
+        print("Refusing to install the plugin runtime without --yes", file=sys.stderr)
         return 2
     packages = ["weasyprint>=62,<70", "reportlab>=4,<5"]
+    runtime = _runtime_path()
+    runtime.mkdir(parents=True, exist_ok=True)
     if importlib.util.find_spec("pip") is not None:
-        command = [sys.executable, "-m", "pip", "install", *packages]
+        command = [
+            sys.executable, "-m", "pip", "install", "--upgrade",
+            "--target", str(runtime), *packages,
+        ]
     else:
         uv = _find_uv()
         if not uv:
             print("Neither pip nor uv is available; install one package manager first", file=sys.stderr)
             return 2
-        command = _portable_command(uv, "pip", "install", "--python", sys.executable, *packages)
+        command = _portable_command(
+            uv, "pip", "install", "--upgrade", "--target", str(runtime), *packages
+        )
     return subprocess.run(command).returncode
 
 

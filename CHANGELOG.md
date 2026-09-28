@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.6.2 - 2026-09-28
+
+- Keep PDF renderer packages in the plugin's persistent data directory instead of Hermes' core virtual environment, so a normal Hermes upgrade cannot remove them.
+- Run and diagnose rendering with that plugin-owned runtime on Linux, Windows, WSL2, and Docker.
+
 ## 4.6.1 - 2026-09-28
 
 - Locate the Hermes profile-managed `uv` executable during PDF runtime setup, including native Windows `uv.exe`, so a standard Hermes installation does not incorrectly report that no package manager is available.
