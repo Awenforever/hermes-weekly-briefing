@@ -8,9 +8,6 @@ license: MIT
 homepage: https://github.com/Awenforever/hermes-weekly-briefing
 tags: [research, weekly-report, pdf, email]
 requires_hermes: ">=0.21.3,<0.22"
-python_dependencies:
-  - "weasyprint>=62,<70"
-  - "reportlab>=4,<5"
 config_schema:
   max_selected:
     type: int
