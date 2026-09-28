@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.6.1 - 2026-09-28
+
+- Locate the Hermes profile-managed `uv` executable during PDF runtime setup, including native Windows `uv.exe`, so a standard Hermes installation does not incorrectly report that no package manager is available.
+
 ## 4.6.0 - 2026-09-28
 
 - Expand first-class discovery to OpenAlex, Semantic Scholar, Crossref, arXiv,

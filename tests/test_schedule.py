@@ -16,6 +16,22 @@ SPEC.loader.exec_module(plugin)
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_runtime_installer_finds_profile_managed_uv(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            uv = home / "bin" / ("uv.exe" if plugin.os.name == "nt" else "uv")
+            uv.parent.mkdir(parents=True)
+            uv.write_text("", encoding="utf-8")
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
+                plugin.shutil, "which", return_value=None
+            ), mock.patch.object(plugin.importlib.util, "find_spec", return_value=None), mock.patch.object(
+                plugin.subprocess, "run", return_value=argparse.Namespace(returncode=0)
+            ) as run:
+                self.assertEqual(0, plugin._install_runtime(True))
+            command = run.call_args.args[0]
+            self.assertEqual(str(uv), command[0])
+            self.assertEqual(["pip", "install", "--python", plugin.sys.executable], command[1:5])
+
     def test_mail_probe_uses_persistent_hermes_workspace(self):
         completed = argparse.Namespace(returncode=0, stdout='{"ok":true}', stderr="")
         with mock.patch.object(plugin, "_find_agently_cli", return_value="/bin/agently-cli"), mock.patch.object(

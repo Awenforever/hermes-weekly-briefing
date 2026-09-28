@@ -295,6 +295,17 @@ def _portable_command(executable: str, *arguments: str) -> list[str]:
     return command
 
 
+def _find_uv() -> str | None:
+    """Locate uv in PATH or in the profile-managed Hermes tool directory."""
+    executable = "uv.exe" if os.name == "nt" else "uv"
+    candidates = [
+        shutil.which("uv"),
+        str(_home() / "bin" / executable),
+        str(Path.home() / ".local" / "bin" / executable),
+    ]
+    return next((str(value) for value in candidates if value and Path(value).is_file()), None)
+
+
 def _agently_env(config: dict | None = None) -> dict[str, str]:
     """Keep every Agently probe/login/send in Hermes' persisted workspace."""
     env = os.environ.copy()
@@ -372,7 +383,7 @@ def _install_runtime(confirmed: bool) -> int:
     if importlib.util.find_spec("pip") is not None:
         command = [sys.executable, "-m", "pip", "install", *packages]
     else:
-        uv = shutil.which("uv")
+        uv = _find_uv()
         if not uv:
             print("Neither pip nor uv is available; install one package manager first", file=sys.stderr)
             return 2
