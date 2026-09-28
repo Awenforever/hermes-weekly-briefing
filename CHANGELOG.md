@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.6.3 - 2026-09-28
+
+- Pin isolated PDF packages to Hermes' active Python interpreter and segregate them by Python ABI and operating system, preventing cross-version native-wheel mismatches.
+
 ## 4.6.2 - 2026-09-28
 
 - Keep PDF renderer packages in the plugin's persistent data directory instead of Hermes' core virtual environment, so a normal Hermes upgrade cannot remove them.

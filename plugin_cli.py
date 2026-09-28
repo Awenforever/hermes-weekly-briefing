@@ -43,7 +43,8 @@ def _runtime_path() -> Path:
     lockfile.  Optional plugin packages therefore belong under plugin-data,
     which is both persistent and outside that reconciliation boundary.
     """
-    return _data() / "runtime" / "python"
+    abi = str(getattr(sys.implementation, "cache_tag", "python") or "python")
+    return _data() / "runtime" / f"{abi}-{sys.platform}"
 
 
 def register_cli(parser: argparse.ArgumentParser) -> None:
@@ -421,7 +422,8 @@ def _install_runtime(confirmed: bool) -> int:
             print("Neither pip nor uv is available; install one package manager first", file=sys.stderr)
             return 2
         command = _portable_command(
-            uv, "pip", "install", "--upgrade", "--target", str(runtime), *packages
+            uv, "pip", "install", "--python", sys.executable,
+            "--upgrade", "--target", str(runtime), *packages
         )
     return subprocess.run(command).returncode
 

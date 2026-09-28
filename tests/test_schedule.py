@@ -30,13 +30,15 @@ class ScheduleTests(unittest.TestCase):
                 self.assertEqual(0, plugin._install_runtime(True))
             command = run.call_args.args[0]
             self.assertEqual(str(uv), command[0])
-            self.assertEqual(["pip", "install", "--upgrade", "--target"], command[1:5])
-            self.assertEqual(str(home / "plugin-data" / "hermes-weekly-briefing" / "runtime" / "python"), command[5])
+            self.assertEqual(["pip", "install", "--python", plugin.sys.executable], command[1:5])
+            self.assertEqual(["--upgrade", "--target"], command[5:7])
+            expected = home / "plugin-data" / "hermes-weekly-briefing" / "runtime" / f"{plugin.sys.implementation.cache_tag}-{plugin.sys.platform}"
+            self.assertEqual(str(expected), command[7])
 
     def test_runtime_is_plugin_owned_and_survives_core_environment_replacement(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
-            runtime = home / "plugin-data" / "hermes-weekly-briefing" / "runtime" / "python"
+            runtime = home / "plugin-data" / "hermes-weekly-briefing" / "runtime" / f"{plugin.sys.implementation.cache_tag}-{plugin.sys.platform}"
             runtime.mkdir(parents=True)
             (runtime / "sentinel.txt").write_text("persistent", encoding="utf-8")
             with mock.patch.object(plugin, "_home", return_value=home):
