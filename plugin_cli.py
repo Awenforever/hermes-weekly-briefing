@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import urllib.error
@@ -20,6 +21,16 @@ SUPPORTED_SEARCH_SOURCES = {
     "arxiv", "crossref", "semantic_scholar", "openalex", "dblp",
     "openreview", "scopus", "google_scholar",
 }
+
+
+def _trusted_ssl_context() -> ssl.SSLContext:
+    """Use Hermes' bundled CA store when embedded Python has none (Windows)."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 def _home() -> Path:
@@ -245,7 +256,9 @@ def _search_status(config: dict, probe: bool = True) -> dict:
             item["credential"] = "configured via SerpApi"
         try:
             request = urllib.request.Request(probes[source], headers=headers)
-            with urllib.request.urlopen(request, timeout=10) as response:
+            with urllib.request.urlopen(
+                request, timeout=10, context=_trusted_ssl_context()
+            ) as response:
                 response.read(1024)
                 item["ready"] = 200 <= int(getattr(response, "status", 200) or 200) < 400
             item["diagnostic"] = "reachable" if item["ready"] else "unexpected response"
@@ -392,7 +405,8 @@ def _renderer_status() -> dict:
             [sys.executable, "-c", probe], text=True, capture_output=True,
             timeout=30, check=False,
         )
-        result = json.loads(completed.stdout) if completed.returncode == 0 else {}
+        lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        result = json.loads(lines[-1]) if completed.returncode == 0 and lines else {}
     except Exception:
         result = {}
     available = [name for name in ("weasyprint", "reportlab") if result.get(name)]

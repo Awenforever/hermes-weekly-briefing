@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,34 @@ SPEC.loader.exec_module(plugin)
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_renderer_probe_ignores_dependency_banner_before_json(self):
+        completed = argparse.Namespace(
+            returncode=0,
+            stdout="WeasyPrint optional native library warning\n"
+            + json.dumps({"weasyprint": False, "reportlab": True}) + "\n",
+            stderr="",
+        )
+        with mock.patch.object(plugin, "_runtime_path", return_value=Path("runtime")), mock.patch.object(
+            plugin.subprocess, "run", return_value=completed
+        ):
+            status = plugin._renderer_status()
+        self.assertTrue(status["ready"])
+        self.assertEqual(["reportlab"], status["available"])
+
+    def test_search_probe_uses_verified_ssl_context(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.read.return_value = b"{}"
+        context = mock.sentinel.ssl_context
+        config = {"search": {"sources": ["crossref"]}}
+        with mock.patch.object(plugin, "_trusted_ssl_context", return_value=context), mock.patch.object(
+            plugin.urllib.request, "urlopen", return_value=response
+        ) as open_url:
+            status = plugin._search_status(config)
+        self.assertTrue(status["ok"])
+        self.assertIs(context, open_url.call_args.kwargs["context"])
+
     def test_runtime_installer_finds_profile_managed_uv(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)

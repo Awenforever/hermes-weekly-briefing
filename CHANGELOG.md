@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.6.4 - 2026-09-28
+
+- Use Hermes' verified CA bundle when embedded Windows Python has no system CA file, restoring HTTPS academic-source discovery without weakening TLS checks.
+- Make renderer diagnostics tolerate optional WeasyPrint native-library banners and correctly recognize the ReportLab fallback in the isolated plugin runtime.
+
 ## 4.6.3 - 2026-09-28
 
 - Pin isolated PDF packages to Hermes' active Python interpreter and segregate them by Python ABI and operating system, preventing cross-version native-wheel mismatches.

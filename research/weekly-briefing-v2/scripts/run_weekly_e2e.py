@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import textwrap
@@ -61,6 +62,16 @@ NON_ACADEMIC_DOMAINS = {
 # Candidates published after the current year are pipeline artefacts (Crossref
 # "sort=published&order=desc" serves future-dated records) and must never be selected.
 FRESH_WINDOW_DAYS = 180
+
+
+def trusted_ssl_context() -> ssl.SSLContext:
+    """Use a portable CA bundle when the active Python has no system CA file."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 def direction_terms(config: dict[str, Any]) -> tuple[str, ...]:
@@ -213,7 +224,9 @@ def load_existing_candidates(week: str) -> list[dict[str, Any]]:
 def fetch_url(url: str, timeout: int = 15) -> tuple[int, str, str]:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "HermesWeeklyBriefing/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(
+            req, timeout=timeout, context=trusted_ssl_context()
+        ) as r:
             ct = r.headers.get_content_type()
             return r.status, ct, r.read().decode("utf-8", errors="replace")
     except Exception as e:
@@ -319,7 +332,9 @@ def semantic_scholar_search(queries: list[str], max_each: int = 5, api_key_env: 
             headers=headers,
         )
         try:
-            with urllib.request.urlopen(req, timeout=25) as response:
+            with urllib.request.urlopen(
+                req, timeout=25, context=trusted_ssl_context()
+            ) as response:
                 payload = json.loads(response.read().decode("utf-8", errors="replace"))
         except Exception:
             consecutive_failures += 1
@@ -377,7 +392,9 @@ def openalex_search(
         })
         req = urllib.request.Request("https://api.openalex.org/works?" + params, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=25) as response:
+            with urllib.request.urlopen(
+                req, timeout=25, context=trusted_ssl_context()
+            ) as response:
                 payload = json.loads(response.read().decode("utf-8", errors="replace"))
         except Exception:
             continue
@@ -509,7 +526,9 @@ def scopus_search(
         params = urllib.parse.urlencode({"query": scopus_query, "count": max_each, "sort": "-coverDate", "view": "STANDARD"})
         req = urllib.request.Request("https://api.elsevier.com/content/search/scopus?" + params, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=25) as response:
+            with urllib.request.urlopen(
+                req, timeout=25, context=trusted_ssl_context()
+            ) as response:
                 entries = json.loads(response.read().decode("utf-8", errors="replace")).get("search-results", {}).get("entry", [])
         except Exception:
             continue
