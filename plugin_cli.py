@@ -301,15 +301,51 @@ def _write_config(config: dict) -> None:
 
 
 def _find_agently_cli() -> str | None:
+    npm = _find_npm()
+    npm_directory = Path(npm).parent if npm else None
+    roaming_npm = Path(os.environ.get("APPDATA", "")) / "npm" if os.environ.get("APPDATA") else None
     candidates = [
         os.environ.get("AGENTLY_CLI_PATH"),
         shutil.which("agently-cli"),
         shutil.which("agently"),
+        str(npm_directory / "agently-cli.cmd") if npm_directory else None,
+        str(npm_directory / "agently.cmd") if npm_directory else None,
+        str(roaming_npm / "agently-cli.cmd") if roaming_npm else None,
+        str(roaming_npm / "agently.cmd") if roaming_npm else None,
         str(Path.home() / ".local" / "bin" / "agently-cli"),
         str(Path.home() / ".local" / "bin" / "agently"),
         "/usr/local/bin/agently-cli",
         "/usr/local/bin/agently",
     ]
+    return next((str(value) for value in candidates if value and Path(value).is_file()), None)
+
+
+def _find_npm() -> str | None:
+    """Find npm even when a Windows package manager exposes only node.exe.
+
+    WinGet's user-scoped portable Node package creates a command alias for
+    ``node`` but keeps ``npm.cmd`` beside the real executable.  Looking only at
+    PATH therefore produces a false missing-dependency result on a clean
+    Windows profile.
+    """
+    candidates: list[str | None] = [os.environ.get("NPM_PATH"), shutil.which("npm")]
+    node = shutil.which("node")
+    if node:
+        node_path = Path(node)
+        candidates.extend(
+            [
+                str(node_path.with_name("npm.cmd")),
+                str(node_path.resolve().with_name("npm.cmd")),
+            ]
+        )
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if os.name == "nt" and local_app_data:
+        packages = Path(local_app_data) / "Microsoft" / "WinGet" / "Packages"
+        candidates.extend(
+            str(path)
+            for path in sorted(packages.glob("OpenJS.NodeJS*/*/npm.cmd"), reverse=True)
+        )
+    candidates.extend(["/usr/local/bin/npm", "/usr/bin/npm"])
     return next((str(value) for value in candidates if value and Path(value).is_file()), None)
 
 
@@ -727,9 +763,13 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
         if not args.yes:
             print("Refusing a global install without --yes", file=sys.stderr)
             return 2
-        npm = shutil.which("npm")
+        npm = _find_npm()
         if not npm:
-            print("npm is required to install @tencent-qqmail/agently-cli", file=sys.stderr)
+            print(
+                "npm is required to install @tencent-qqmail/agently-cli; "
+                "install a supported Node.js LTS package, restart the shell, and retry",
+                file=sys.stderr,
+            )
             return 2
         result = subprocess.run(_portable_command(npm, "install", "--global", "@tencent-qqmail/agently-cli"))
         return result.returncode

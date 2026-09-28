@@ -17,6 +17,37 @@ SPEC.loader.exec_module(plugin)
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_npm_discovery_checks_beside_node_alias_target(self):
+        with tempfile.TemporaryDirectory() as raw:
+            package = Path(raw) / "node-package"
+            package.mkdir()
+            node = package / "node.exe"
+            npm = package / "npm.cmd"
+            node.write_bytes(b"")
+            npm.write_text("@echo off\n", encoding="utf-8")
+
+            def which(name):
+                return str(node) if name == "node" else None
+
+            with mock.patch.object(plugin.shutil, "which", side_effect=which), mock.patch.dict(
+                plugin.os.environ, {}, clear=True
+            ):
+                self.assertEqual(str(npm), plugin._find_npm())
+
+    def test_agently_discovery_checks_beside_npm(self):
+        with tempfile.TemporaryDirectory() as raw:
+            package = Path(raw)
+            npm = package / "npm.cmd"
+            agently = package / "agently-cli.cmd"
+            npm.write_text("@echo off\n", encoding="utf-8")
+            agently.write_text("@echo off\n", encoding="utf-8")
+            with mock.patch.object(plugin, "_find_npm", return_value=str(npm)), mock.patch.object(
+                plugin.shutil, "which", return_value=None
+            ), mock.patch.object(plugin.Path, "home", return_value=package), mock.patch.dict(
+                plugin.os.environ, {}, clear=True
+            ):
+                self.assertEqual(str(agently), plugin._find_agently_cli())
+
     def test_renderer_probe_ignores_dependency_banner_before_json(self):
         completed = argparse.Namespace(
             returncode=0,

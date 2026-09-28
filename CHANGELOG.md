@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.6.5 - 2026-09-28
+
+- Discover npm in user-scoped WinGet Node installations where Windows exposes
+  `node.exe` as an alias but omits `npm.cmd` from `PATH`.
+- Discover Agently command shims beside npm and in the standard Windows roaming
+  npm command directory, so a successful installation is immediately usable.
+
 ## 4.6.4 - 2026-09-28
 
 - Use Hermes' verified CA bundle when embedded Windows Python has no system CA file, restoring HTTPS academic-source discovery without weakening TLS checks.
