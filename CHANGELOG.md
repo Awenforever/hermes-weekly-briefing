@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.6.6 - 2026-09-28
+
+- Pass the single, validated Agently CLI path from the plugin entry point into
+  the report subprocess. This prevents execution from disagreeing with doctor
+  and setup on environments whose global command shims are not in `PATH`.
+
 ## 4.6.5 - 2026-09-28
 
 - Discover npm in user-scoped WinGet Node installations where Windows exposes

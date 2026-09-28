@@ -125,8 +125,12 @@ class ScheduleTests(unittest.TestCase):
             )
             completed = argparse.Namespace(returncode=0)
             runtime = Path(raw) / "runtime"
+            agently = Path(raw) / "agently-cli.cmd"
+            agently.write_text("@echo off\n", encoding="utf-8")
             with mock.patch.object(plugin, "_load_config", return_value={"max_selected": 5}), mock.patch.object(
                 plugin, "_runtime_path", return_value=runtime
+            ), mock.patch.object(
+                plugin, "_find_agently_cli", return_value=str(agently)
             ), mock.patch.object(plugin.subprocess, "run", return_value=completed) as run:
                 self.assertEqual(0, plugin._run(args))
             command = run.call_args.args[0]
@@ -135,6 +139,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual(resolved, command[command.index("--data-dir") + 1])
             self.assertEqual(resolved, env["HERMES_WEEKLY_DATA_DIR"])
             self.assertEqual(str(runtime), env["HERMES_WEEKLY_RUNTIME_PATH"])
+            self.assertEqual(str(agently), env["AGENTLY_CLI_PATH"])
 
     def test_existing_agent_job_is_repaired_in_place(self):
         with tempfile.TemporaryDirectory() as raw:

@@ -124,6 +124,9 @@ def _run(args: argparse.Namespace) -> int:
     env = os.environ.copy()
     env["HERMES_WEEKLY_DATA_DIR"] = str(data_dir)
     env["HERMES_WEEKLY_RUNTIME_PATH"] = str(_runtime_path())
+    agently_cli = _find_agently_cli()
+    if agently_cli:
+        env["AGENTLY_CLI_PATH"] = agently_cli
     return subprocess.run(command, env=env).returncode
 
 
