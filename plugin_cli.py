@@ -141,7 +141,8 @@ def _hermes_cli() -> str:
 
 def _weekly_jobs() -> list[dict[str, str]]:
     result = subprocess.run(
-        [_hermes_cli(), "cron", "list"], text=True, capture_output=True, check=False
+        [_hermes_cli(), "cron", "list"], text=True, encoding="utf-8",
+        errors="replace", capture_output=True, check=False,
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "cannot list Hermes cron jobs")
@@ -398,7 +399,8 @@ def _mail_status(probe: bool = True) -> dict:
         return result
     try:
         check = subprocess.run(
-            _portable_command(cli, "+me"), text=True, capture_output=True,
+            _portable_command(cli, "+me"), text=True, encoding="utf-8",
+            errors="replace", capture_output=True,
             timeout=30, check=False, env=agently_env,
         )
         result["authenticated"] = check.returncode == 0
@@ -441,7 +443,8 @@ def _renderer_status() -> dict:
     )
     try:
         completed = subprocess.run(
-            [sys.executable, "-c", probe], text=True, capture_output=True,
+            [sys.executable, "-c", probe], text=True, encoding="utf-8",
+            errors="replace", capture_output=True,
             timeout=30, check=False,
         )
         lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
@@ -712,7 +715,10 @@ def _install_schedule(schedule: str | None) -> int:
         ]
     else:
         command = [cli, "cron", "create", schedule, "", *common]
-    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        command, text=True, encoding="utf-8", errors="replace",
+        capture_output=True, check=False,
+    )
     if result.returncode:
         print(result.stderr.strip() or result.stdout.strip(), file=sys.stderr)
         return result.returncode

@@ -17,6 +17,20 @@ SPEC.loader.exec_module(plugin)
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_cron_status_decodes_hermes_output_as_utf8(self):
+        completed = argparse.Namespace(
+            returncode=0,
+            stdout="  abcdef123456 [active]\n    Name:      hermes-weekly-briefing\n",
+            stderr="",
+        )
+        with mock.patch.object(plugin, "_hermes_cli", return_value="hermes"), mock.patch.object(
+            plugin.subprocess, "run", return_value=completed
+        ) as run:
+            jobs = plugin._weekly_jobs()
+        self.assertEqual("abcdef123456", jobs[0]["id"])
+        self.assertEqual("utf-8", run.call_args.kwargs["encoding"])
+        self.assertEqual("replace", run.call_args.kwargs["errors"])
+
     def test_npm_discovery_checks_beside_node_alias_target(self):
         with tempfile.TemporaryDirectory() as raw:
             package = Path(raw) / "node-package"

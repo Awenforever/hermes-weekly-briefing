@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.6.7 - 2026-09-29
+
+- Decode captured Hermes, Agently, and renderer output explicitly as UTF-8 with
+  replacement diagnostics. Windows no longer crashes while reading cron output
+  that contains localized or non-ASCII text.
+
 ## 4.6.6 - 2026-09-28
 
 - Pass the single, validated Agently CLI path from the plugin entry point into
