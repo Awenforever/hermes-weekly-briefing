@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.6.8 - 2026-09-29
+
+- Make the published configuration template inherit Hermes model routing and
+  leave both primary and fallback model selection to the user's Hermes setup.
+
 ## 4.6.7 - 2026-09-29
 
 - Decode captured Hermes, Agently, and renderer output explicitly as UTF-8 with

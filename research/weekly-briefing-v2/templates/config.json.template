@@ -71,8 +71,9 @@
   },
   "analysis": {
     "auto": true,
-    "provider_name": "USTC",
-    "model": "qwen3.6-chat",
+    "provider_name": "hermes",
+    "model": "",
+    "fallback_model": "",
     "timeout_seconds": 180,
     "max_tokens": 7000
   },
