@@ -194,6 +194,10 @@ def _config_diagnostics() -> list[str]:
     recipients = delivery.get("email_to") if isinstance(delivery.get("email_to"), list) else []
     if not [value for value in recipients if "@" in str(value) and "$" not in str(value)]:
         errors.append("delivery.email_to needs at least one real email address")
+    schedule = config.get("schedule") if isinstance(config.get("schedule"), dict) else {}
+    configured_timezone = str(schedule.get("timezone") or "").strip()
+    if not configured_timezone or "$" in configured_timezone:
+        errors.append("schedule.timezone needs an explicit IANA timezone")
     search = config.get("search") if isinstance(config.get("search"), dict) else {}
     raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"]
     sources = {
@@ -746,9 +750,9 @@ def _configure(args: argparse.Namespace) -> int:
     config = _load_config()
     if not config:
         initialized = _initialize(args.email_to, args.keyword, emit=False)
-        if initialized:
-            return initialized
         config = _load_config()
+        if initialized and not config:
+            return initialized
     research = config.setdefault("research", {})
     delivery = config.setdefault("delivery", {})
     analysis = config.setdefault("analysis", {})

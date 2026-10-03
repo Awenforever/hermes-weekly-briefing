@@ -8,6 +8,7 @@
 - Made new installations inherit the Hermes profile timezone instead of using an author-specific default.
 - Clarified that email is an output channel, not a feedback-ingestion mechanism.
 - Require PDF dependencies to exist in the plugin-owned persistent runtime instead of treating packages found in the replaceable Hermes core environment as an isolated installation.
+- Keep setup unresolved when no Hermes profile timezone can be inherited, preventing device-local timezone drift.
 
 ## 4.6.8 - 2026-09-29
 
