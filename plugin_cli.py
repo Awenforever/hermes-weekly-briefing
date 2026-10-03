@@ -664,8 +664,10 @@ def _profile_timezone() -> str:
                 return str(value["timezone"]).strip()
         except Exception:
             pass
-        match = re.search(r"(?m)^\s*timezone\s*:\s*['\"]?([^'\"#\r\n]+)", text)
-        if match:
+        match = re.search(
+            r"(?m)^[ \t]*timezone[ \t]*:[ \t]*['\"]?([^'\"#\r\n]+)", text
+        )
+        if match and match.group(1).strip():
             return match.group(1).strip()
     return str(os.environ.get("TZ") or "").strip()
 

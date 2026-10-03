@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.7.2 - 2026-10-03
+
+- Treat an empty `timezone: ''` configuration value as absent so Docker's
+  standard `TZ` fallback is reached instead of returning an empty timezone.
+
 ## 4.7.1 - 2026-10-03
 
 - Recognize the standard container `TZ` value when no Hermes-specific timezone
