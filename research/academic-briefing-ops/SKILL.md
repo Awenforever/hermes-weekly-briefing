@@ -3,7 +3,6 @@ name: academic-briefing-ops
 description: 学术周报系统运维：初始化、依赖检查、cron 管理、健康检查、Archive 审查/修剪、候选清理、BibTeX 导出、全文 PDF 管理、Obsidian 导出、关系图谱维护。不负责论文搜索/周报生成/PDF/邮件。
 version: 2.0.0
 related_skills:
-  - research-profile-engine
   - academic-weekly-briefing-core
   - academic-report-render-deliver
 ---

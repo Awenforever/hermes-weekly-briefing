@@ -5,7 +5,7 @@
 - arXiv and Crossref discovery
 - canonical DOI/arXiv deduplication
 - paper-like hard filtering and relevance scoring
-- optional, explicitly enabled profile and user-feedback weighting
+- optional, explicit user-confirmed feedback for discovery and ranking
 
 ## Analysis
 
@@ -24,6 +24,6 @@
 ## Safety invariants
 
 - production delivery requires deep analysis
-- generated “next focus” text never changes the research profile
+- generated “next focus” text never changes research preferences
 - model-generated observations are not treated as user feedback
 - no WeChat chunk or WeChat delivery artifact is produced

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in live backend smoke test. Never prints provider credentials or model prose."""
+"""Opt-in live Hermes model-router smoke test without provider assumptions."""
 
 from __future__ import annotations
 
@@ -18,21 +18,27 @@ def main() -> int:
     engine = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     spec.loader.exec_module(engine)
+    paper_id = "doi:10.1000/example"
     papers = [{
-        "canonical_id": "arxiv:2609.01234",
-        "title": "A Multimodal Foundation Model for Wildfire Smoke Mapping",
-        "abstract": "We combine multispectral satellite observations with temporal priors to map wildfire smoke while reporting uncertainty and cross-region transfer performance.",
-        "authors": ["Lin Chen", "Mei Wang"],
+        "canonical_id": paper_id,
+        "title": "A Reproducible Benchmark for Quantum Error Correction",
+        "abstract": "The study compares decoders under controlled noise models and reports uncertainty, ablations, and cross-device transfer.",
+        "authors": ["Alex Example", "Riley Example"],
         "published": "2026",
-        "arxiv_id": "2609.01234",
+        "doi": "10.1000/example",
     }]
     result, provenance = engine.analyze_papers(papers, {}, Path(args.hermes_home))
-    record = result.get("papers", {}).get("arxiv:2609.01234", {})
-    required = {"problem", "why_it_matters", "method_steps", "evidence", "comparison", "limitations"}
+    record = result.get("papers", {}).get(paper_id, {})
+    required = {
+        "problem", "why_it_matters", "method_steps", "evidence", "comparison", "limitations"
+    }
     missing = sorted(required - set(record))
     if missing:
         raise RuntimeError("live analysis missing fields: " + ", ".join(missing))
-    print(json.dumps({"ok": True, "provenance": provenance, "fields": sorted(record)}, ensure_ascii=False))
+    print(json.dumps(
+        {"ok": True, "provenance": provenance, "fields": sorted(record)},
+        ensure_ascii=False,
+    ))
     return 0
 
 

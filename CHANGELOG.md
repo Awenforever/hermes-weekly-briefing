@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.7.0 - 2026-10-03
+
+- Removed developer research topics and examples from the public setup surface.
+- Retired unverifiable automatic profile weighting.
+- Added explicit, channel-independent feedback commands with an append-only audit trail.
+- Made new installations inherit the Hermes profile timezone instead of using an author-specific default.
+- Clarified that email is an output channel, not a feedback-ingestion mechanism.
+- Require PDF dependencies to exist in the plugin-owned persistent runtime instead of treating packages found in the replaceable Hermes core environment as an isolated installation.
+
 ## 4.6.8 - 2026-09-29
 
 - Make the published configuration template inherit Hermes model routing and

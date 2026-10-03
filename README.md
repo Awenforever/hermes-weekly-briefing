@@ -19,7 +19,7 @@ Weekly Briefing 会围绕你的研究方向发现并筛选论文，完成基于�
 | 精美报告 | 中文 PDF、方法卡片、比较表、作者卡片和可点击原文链接 |
 | 交付质检 | 发送前检查分析完整性、作者身份、原文链接、封面统计与 PDF 文件 |
 | 稳定交付 | 邮件发送、投递回执、失败可诊断、历史报告可追溯 |
-| 防止漂移 | “下周关注”只用于持续追踪，不会自行改写你的核心方向 |
+| 防止漂移 | 研究方向只来自你的明确设置；“下周关注”和模型输出不会反向改写偏好 |
 
 ## 让 Hermes 帮你安装
 
@@ -52,9 +52,9 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 - 每周发送时间与时区；
 - 可选的分析模型与备用模型（留空时动态继承 Hermes）；
 - 学术搜索源；开放来源默认开箱即用，凭据型来源只引用 Hermes 环境中的变量；
-- 是否允许显式维护的研究画像或用户反馈影响排序。
+- 可选的显式反馈偏好；没有确认记录时不启用，添加第一条时自动生效，全部撤销后自动停用。
 
-默认不会让历史周报自己“训练”出新的兴趣。只有你明确开启画像权重或反馈学习后，历史偏好才会参与筛选。
+插件不会推荐作者的研究方向，也不会从历史周报、邮件回信或普通聊天中暗中推断你的兴趣。首次设置只接受你明确给出的关键词。以后若想调整偏好，可以在任意 Hermes 对话渠道告诉 Hermes；Hermes 必须先复述并确认，再写入可查看、可撤销的反馈记录。
 
 计划任务按 Hermes profile 的 IANA 时区运行。若你选择的时区与 profile 不一致，体检会明确拦截，而不会在错误的本地时间悄悄发送。
 
@@ -92,8 +92,8 @@ hermes weekly-briefing setup \
 
 # 可选：为容易歧义的方向设置严格标题边界；可重复传入
 hermes weekly-briefing setup \
-  --direction-term "wildfire" \
-  --direction-term "smoke detection"
+  --direction-term "YOUR STRICT TITLE PHRASE" \
+  --direction-term "YOUR SECOND STRICT PHRASE"
 
 # 可选：使用由 Hermes/系统环境管理的 Semantic Scholar 密钥
 hermes weekly-briefing setup \
@@ -112,6 +112,24 @@ hermes weekly-briefing setup \
 ```
 
 插件只保存“使用哪个环境变量”的选择，不接管、复制或输出密钥。安装过程会真实请求每个已选来源；如果全部不可达，引导会停在搜索配置步骤，并说明需要配置来源、凭据、网络出口或代理。
+
+## 反馈与偏好
+
+周报通过邮件发送，但反馈**不要求回复邮件**，插件也不会监控收件箱。你可以通过当前 Hermes 已有的任意对话渠道表达明确反馈；确认后，Hermes 调用下面的本地命令记录偏好：
+
+```bash
+# 多看、少看或主动探索某个由用户自己给出的主题
+hermes weekly-briefing feedback --topic "YOUR TOPIC" --direction more
+hermes weekly-briefing feedback --topic "YOUR TOPIC" --direction less
+hermes weekly-briefing feedback --topic "YOUR TOPIC" --direction explore
+
+# 查看、撤销或清空
+hermes weekly-briefing feedback
+hermes weekly-briefing feedback --remove "YOUR TOPIC"
+hermes weekly-briefing feedback --clear
+```
+
+每次变更同时写入当前偏好和追加式审计记录。只有 `source=user` 的确认记录能影响检索和排序；报告正文、“下周关注”、模型推测及邮件内容都不能自行成为反馈。插件不再宣称存在自动画像学习：跨会话推断研究兴趣需要独立、可审计的生产数据链，本插件目前没有也不会伪装拥有这条链。
 
 ## 交付边界
 

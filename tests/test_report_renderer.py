@@ -18,39 +18,39 @@ class ReportRendererTests(unittest.TestCase):
     def sample_papers(self):
         return [
             {
-                "title": "A Multimodal Foundation Model for Wildfire Smoke Mapping",
+                "title": "A Reproducible Benchmark for Quantum Error Correction",
                 "url": "https://arxiv.org/abs/2609.01234",
                 "arxiv_id": "2609.01234",
                 "source": "arxiv_api",
                 "published": "2026",
                 "authors": ["Lin Chen", "Mei Wang", "A. Rivera"],
-                "abstract": "We combine multispectral satellite observations with temporal priors to map wildfire smoke while reporting uncertainty and cross-region transfer performance.",
+                "abstract": "We compare quantum decoders under controlled noise models while reporting uncertainty, ablations, and cross-device transfer performance.",
                 "team_profile": {
-                    "institutions": ["Example Remote Sensing Laboratory", "Example Climate Institute"],
-                    "work_topics": ["Remote Sensing", "Wildfire", "Computer Vision"],
+                    "institutions": ["Example Quantum Laboratory", "Example Computing Institute"],
+                    "work_topics": ["Quantum Computing", "Error Correction", "Benchmarking"],
                     "authors": [
-                        {"name": "Lin Chen", "works_count": 84, "cited_by_count": 2310, "h_index": 21, "topics": ["Remote Sensing", "Wildfire"], "openalex": "https://openalex.org/A123", "recent_works": [{"title": "Smoke Transport", "year": "2025", "url": "https://doi.org/10.1000/smoke"}]},
-                        {"name": "Mei Wang", "works_count": 52, "cited_by_count": 1190, "h_index": 16, "topics": ["Computer Vision", "Earth Observation"]},
+                        {"name": "Lin Chen", "works_count": 84, "cited_by_count": 2310, "h_index": 21, "topics": ["Quantum Computing", "Error Correction"], "openalex": "https://openalex.org/A123", "recent_works": [{"title": "Decoder Transfer", "year": "2025", "url": "https://doi.org/10.1000/decoder"}]},
+                        {"name": "Mei Wang", "works_count": 52, "cited_by_count": 1190, "h_index": 16, "topics": ["Fault Tolerance", "Benchmarking"]},
                     ],
                 },
                 "analysis": {
-                    "problem": "如何在跨地区、跨传感器条件下稳定识别山火烟羽，并显式报告不确定性？",
-                    "why_it_matters": "它把时序先验与多光谱表征放到同一条可验证流程中，直接对应业务中的域偏移与漏检风险。",
+                    "problem": "如何在跨设备噪声条件下稳定评估量子纠错解码器，并显式报告不确定性？",
+                    "why_it_matters": "它把噪声建模与解码评估放到同一条可复现流程中，直接对应设备迁移与失效风险。",
                     "method_steps": [
-                        {"name": "多源对齐", "detail": "统一不同卫星的空间分辨率、时间窗口和光谱通道。"},
-                        {"name": "时空编码", "detail": "用基础模型提取烟羽纹理，并用时序先验约束传播方向。"},
-                        {"name": "不确定性校准", "detail": "区分模型不确定性与标签歧义，输出像素级置信度。"},
+                        {"name": "噪声对齐", "detail": "统一不同量子设备的错误模型、测量轮次和评估协议。"},
+                        {"name": "解码建模", "detail": "用统一接口比较多种解码器并保留设备差异。"},
+                        {"name": "不确定性校准", "detail": "区分模型误差与测量噪声，输出可比较的置信度。"},
                     ],
-                    "evidence": ["跨区域测试保持主要指标稳定。", "消融实验显示时序先验改善薄烟识别。"],
+                    "evidence": ["跨设备测试保持主要指标稳定。", "消融实验显示噪声建模改善解码可靠性。"],
                     "comparison": [
                         {"dimension": "跨区域泛化", "paper": "显式跨域评估", "baseline": "以单区域随机划分为主"},
                         {"dimension": "可信度", "paper": "提供校准误差", "baseline": "只报告分割精度"},
                     ],
-                    "limitations": ["极薄烟与云边界仍容易混淆。", "需要核验训练数据的地区覆盖。"],
+                    "limitations": ["极端相关噪声仍难以建模。", "需要核验设备与错误模型的覆盖。"],
                 },
             },
             {
-                "title": "Uncertainty-Aware Cross-Sensor Smoke Segmentation",
+                "title": "Uncertainty-Aware Cross-Device Quantum Decoding",
                 "doi": "10.1000/example.2026.42",
                 "url": "https://doi.org/10.1000/example.2026.42",
                 "source": "crossref_api",
@@ -65,36 +65,66 @@ class ReportRendererTests(unittest.TestCase):
                     ],
                 },
                 "analysis": {
-                    "problem": "如何在传感器差异明显时保持烟雾分割结果可校准？",
-                    "why_it_matters": "它把跨传感器对齐和置信度校准拆开评估，便于判断性能提升究竟来自哪里。",
+                    "problem": "如何在设备差异明显时保持量子解码结果可校准？",
+                    "why_it_matters": "它把跨设备对齐和置信度校准拆开评估，便于判断性能提升究竟来自哪里。",
                     "method_steps": [
-                        {"name": "传感器对齐", "detail": "学习共享表征并保留各传感器特有信息。"},
-                        {"name": "分割预测", "detail": "以共享解码器输出烟雾区域。"},
-                        {"name": "校准验证", "detail": "按地区和传感器分别报告可靠性曲线。"},
+                        {"name": "设备对齐", "detail": "学习共享表征并保留各设备特有的噪声信息。"},
+                        {"name": "错误解码", "detail": "以共享解码器输出纠错决策。"},
+                        {"name": "校准验证", "detail": "按设备与错误类型分别报告可靠性曲线。"},
                     ],
-                    "evidence": ["在两个跨传感器测试集上报告完整消融。"],
+                    "evidence": ["在两个跨设备测试集上报告完整消融。"],
                     "comparison": [{"dimension": "校准", "paper": "分组可靠性评估", "baseline": "总体平均置信度"}],
-                    "limitations": ["尚未覆盖极端沙尘与烟雾混合场景。"],
+                    "limitations": ["尚未覆盖强相关与突发噪声混合场景。"],
                 },
             },
         ]
 
     def test_fixed_focus_does_not_consume_profile_by_default(self):
         queries = runner.build_queries(
-            {"research": {"core_keywords": ["wildfire smoke"]}},
+            {"research": {"core_keywords": ["quantum error correction"]}},
             {"topic_weights": {"drifting generated topic": 99}},
             {"biases": [{"source": "report", "direction": "boost", "topic": "self feedback"}]},
         )
-        self.assertIn("wildfire smoke", queries)
+        self.assertIn("quantum error correction", queries)
         self.assertNotIn("drifting generated topic", queries)
         self.assertNotIn("self feedback", queries)
+
+    def test_only_explicit_user_feedback_changes_discovery_and_ranking(self):
+        config = {
+            "research": {
+                "core_keywords": ["quantum error correction"],
+                "use_user_feedback": True,
+            }
+        }
+        feedback = {"biases": [
+            {"source": "user", "direction": "increase", "topic": "surface code"},
+            {"source": "user", "direction": "decrease", "topic": "ion trap"},
+            {"source": "report", "direction": "boost", "topic": "model invented topic"},
+        ]}
+        queries = runner.build_queries(config, {"topic_weights": {"hidden profile": 100}}, feedback)
+        self.assertIn("surface code", queries)
+        self.assertNotIn("ion trap", queries)
+        self.assertNotIn("model invented topic", queries)
+        self.assertNotIn("hidden profile", queries)
+        self.assertEqual(
+            1.0,
+            runner.feedback_score_adjustment(
+                {"title": "A surface code decoder", "abstract": ""}, config, feedback
+            ),
+        )
+        self.assertEqual(
+            -2.0,
+            runner.feedback_score_adjustment(
+                {"title": "An ion trap architecture", "abstract": ""}, config, feedback
+            ),
+        )
 
     def test_html_and_pdf_keep_original_links(self):
         with tempfile.TemporaryDirectory() as raw:
             target = Path(raw)
             papers = self.sample_papers()
             stats = {"selected_count": 2, "raw_candidates": 18, "cross_week_deduped": 0}
-            queries = ["wildfire smoke satellite segmentation", "multispectral smoke detection"]
+            queries = ["quantum error correction", "fault-tolerant decoding"]
             markdown = runner.make_report("2026-W38", papers, stats, target, queries)
             html_path = target / "report.html"
             html_text = runner.make_report_html("2026-W38", papers, stats, queries, html_path)
@@ -104,7 +134,7 @@ class ReportRendererTests(unittest.TestCase):
             self.assertGreater(pdf_path.stat().st_size, 5000)
             self.assertIn("https://arxiv.org/abs/2609.01234", html_text)
             self.assertIn("https://openalex.org/A123", html_text)
-            self.assertIn("https://doi.org/10.1000/smoke", html_text)
+            self.assertIn("https://doi.org/10.1000/decoder", html_text)
             self.assertIn("跨论文方法与证据对比", html_text)
             self.assertNotIn("weixin", html_text.lower())
             self.assertIn('<b>0</b><span>跨周去重</span>', html_text)
@@ -125,7 +155,7 @@ class ReportRendererTests(unittest.TestCase):
                 + "A long technical explanation continues with evidence and context. " * 40
             )
             html_text = runner.make_report_html(
-                "2026-W38", papers, {"selected_count": 2}, ["wildfire smoke"], target / "report.html"
+                "2026-W38", papers, {"selected_count": 2}, ["quantum error correction"], target / "report.html"
             )
             self.assertIn("· arXiv", html_text)
             self.assertNotIn("w36_arxiv_raw.json", html_text)
@@ -150,7 +180,7 @@ class ReportRendererTests(unittest.TestCase):
         queries = runner.build_queries(config, {}, {})
         self.assertIn("protein folding graph neural network", queries)
         self.assertIn("protein folding drug discovery", queries)
-        self.assertNotIn("wildfire smoke", queries)
+        self.assertNotIn("author private topic", queries)
         terms = runner.direction_terms(config)
         self.assertEqual(("protein folding", "drug discovery"), terms)
         self.assertTrue(runner.direction_verdict({"title": "Graph Models for Protein Folding"}, terms)[0])
@@ -187,7 +217,7 @@ class ReportRendererTests(unittest.TestCase):
             paper["authors"] = []
             paper["team_profile"] = {}
             html_text = runner.make_report_html(
-                "2026-W38", [paper], {"selected_count": 1}, ["wildfire smoke"], Path(raw) / "report.html"
+                "2026-W38", [paper], {"selected_count": 1}, ["quantum error correction"], Path(raw) / "report.html"
             )
             with self.assertRaisesRegex(RuntimeError, "no author identity"):
                 runner.validate_report_quality([paper], html_text)

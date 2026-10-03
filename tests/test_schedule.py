@@ -66,7 +66,14 @@ class ScheduleTests(unittest.TestCase):
         completed = argparse.Namespace(
             returncode=0,
             stdout="WeasyPrint optional native library warning\n"
-            + json.dumps({"weasyprint": False, "reportlab": True}) + "\n",
+            + json.dumps({
+                "weasyprint": {"available": False, "isolated": False},
+                "reportlab": {
+                    "available": True,
+                    "isolated": True,
+                    "origin": "runtime/reportlab/__init__.py",
+                },
+            }) + "\n",
             stderr="",
         )
         with mock.patch.object(plugin, "_runtime_path", return_value=Path("runtime")), mock.patch.object(
@@ -75,6 +82,32 @@ class ScheduleTests(unittest.TestCase):
             status = plugin._renderer_status()
         self.assertTrue(status["ready"])
         self.assertEqual(["reportlab"], status["available"])
+        self.assertTrue(status["isolated"])
+
+    def test_renderer_probe_rejects_packages_found_only_in_hermes_core(self):
+        completed = argparse.Namespace(
+            returncode=0,
+            stdout=json.dumps({
+                "weasyprint": {
+                    "available": True,
+                    "isolated": False,
+                    "origin": "/opt/hermes/site-packages/weasyprint/__init__.py",
+                },
+                "reportlab": {
+                    "available": True,
+                    "isolated": False,
+                    "origin": "/opt/hermes/site-packages/reportlab/__init__.py",
+                },
+            }),
+            stderr="",
+        )
+        with mock.patch.object(plugin, "_runtime_path", return_value=Path("runtime")), mock.patch.object(
+            plugin.subprocess, "run", return_value=completed
+        ):
+            status = plugin._renderer_status()
+        self.assertFalse(status["ready"])
+        self.assertEqual(["weasyprint", "reportlab"], status["host_available"])
+        self.assertIn("runtime-install", status["diagnostic"])
 
     def test_search_probe_uses_verified_ssl_context(self):
         response = mock.MagicMock()
@@ -160,7 +193,7 @@ class ScheduleTests(unittest.TestCase):
             home = Path(raw)
             data = home / "plugin-data" / "hermes-weekly-briefing"
             data.mkdir(parents=True)
-            (data / "config.json").write_text('{"research":{"core_keywords":["smoke"]},"delivery":{"channel":"email","email_to":["a@example.com"]}}', encoding="utf-8")
+            (data / "config.json").write_text('{"research":{"core_keywords":["graph algorithms"]},"delivery":{"channel":"email","email_to":["a@example.com"]}}', encoding="utf-8")
             calls = []
 
             def fake_run(command, **_kwargs):
@@ -183,13 +216,62 @@ class ScheduleTests(unittest.TestCase):
     def test_init_creates_safe_non_drifting_config(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
-            with mock.patch.object(plugin, "_home", return_value=home):
-                self.assertEqual(0, plugin._initialize(["a@example.com"], ["wildfire smoke"]))
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
+                plugin, "_profile_timezone", return_value="Europe/Berlin"
+            ):
+                self.assertEqual(0, plugin._initialize(["a@example.com"], ["quantum error correction"]))
                 self.assertEqual([], plugin._config_diagnostics())
             config = __import__("json").loads((home / "plugin-data" / "hermes-weekly-briefing" / "config.json").read_text(encoding="utf-8"))
-            self.assertFalse(config["research"]["use_profile_weights"])
+            self.assertNotIn("use_profile_weights", config["research"])
             self.assertFalse(config["research"]["use_user_feedback"])
             self.assertEqual("email", config["delivery"]["channel"])
+            self.assertEqual("Europe/Berlin", config["schedule"]["timezone"])
+
+    def test_explicit_feedback_is_auditable_reversible_and_enables_itself(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            data = home / "plugin-data" / "hermes-weekly-briefing"
+            data.mkdir(parents=True)
+            (data / "config.json").write_text(
+                '{"research":{"core_keywords":["quantum error correction"],"use_user_feedback":false},'
+                '"delivery":{"channel":"email","email_to":["a@example.com"]}}',
+                encoding="utf-8",
+            )
+            add = argparse.Namespace(
+                topic=["fault-tolerant decoding"], direction="more", remove=[], clear=False,
+                note="user confirmed in chat",
+            )
+            remove = argparse.Namespace(
+                topic=[], direction="more", remove=["fault-tolerant decoding"], clear=False,
+                note="",
+            )
+            with mock.patch.object(plugin, "_home", return_value=home):
+                self.assertEqual(0, plugin._feedback_command(add))
+                state = plugin._load_feedback()
+                self.assertEqual("user", state["biases"][0]["source"])
+                self.assertEqual("increase", state["biases"][0]["direction"])
+                self.assertTrue(plugin._load_config()["research"]["use_user_feedback"])
+                self.assertEqual(0, plugin._feedback_command(remove))
+                self.assertEqual([], plugin._load_feedback()["biases"])
+                self.assertFalse(plugin._load_config()["research"]["use_user_feedback"])
+            events = (data / "profile" / "feedback_events.jsonl").read_text(encoding="utf-8")
+            self.assertIn('"action": "set"', events)
+            self.assertIn('"action": "remove"', events)
+
+    def test_legacy_automatic_profile_weighting_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            data = home / "plugin-data" / "hermes-weekly-briefing"
+            data.mkdir(parents=True)
+            (data / "config.json").write_text(
+                '{"research":{"core_keywords":["quantum error correction"],'
+                '"use_profile_weights":true},'
+                '"delivery":{"channel":"email","email_to":["a@example.com"]}}',
+                encoding="utf-8",
+            )
+            with mock.patch.object(plugin, "_home", return_value=home):
+                errors = plugin._config_diagnostics()
+            self.assertTrue(any("use_profile_weights is retired" in error for error in errors))
 
     def test_schedule_refuses_until_every_runtime_dependency_is_ready(self):
         with mock.patch.object(plugin, "_doctor_result", return_value={"ok": False, "errors": ["Agently CLI login is required"]}):
@@ -204,7 +286,7 @@ class ScheduleTests(unittest.TestCase):
                 self.assertIn("agently_install", state["unresolved"])
             data = home / "plugin-data" / "hermes-weekly-briefing"
             data.mkdir(parents=True)
-            (data / "config.json").write_text('{"research":{"core_keywords":["smoke"]},"delivery":{"channel":"email","email_to":["a@example.com"]}}', encoding="utf-8")
+            (data / "config.json").write_text('{"research":{"core_keywords":["graph algorithms"]},"delivery":{"channel":"email","email_to":["a@example.com"]}}', encoding="utf-8")
             with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": False, "cli": "/bin/agently-cli", "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
                 state = plugin._setup_status()
                 self.assertEqual(["agently_login"], state["unresolved"])
@@ -215,14 +297,14 @@ class ScheduleTests(unittest.TestCase):
             home = Path(raw)
             args = argparse.Namespace(
                 email_to=["researcher@example.com"],
-                keyword=["wildfire smoke", "satellite segmentation"],
-                direction_term=["wildfire", "smoke detection"],
+                keyword=["quantum error correction", "fault-tolerant computing"],
+                direction_term=["quantum code", "fault-tolerant"],
                 max_selected=4,
                 timezone="Asia/Shanghai",
                 schedule="30 8 * * 5",
-                provider="USTC",
-                model="deepseek-flash",
-                fallback_model="qwen3.6-chat",
+                provider="example-provider",
+                model="primary-model",
+                fallback_model="fallback-model",
                 use_profile_weights=False,
                 use_user_feedback=True,
             )
@@ -233,8 +315,8 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual("30 8 * * 5", config["schedule"]["expression"])
             self.assertEqual("Asia/Shanghai", config["schedule"]["timezone"])
             self.assertTrue(config["research"]["use_user_feedback"])
-            self.assertEqual(["wildfire", "smoke detection"], config["research"]["direction_terms"])
-            self.assertEqual("deepseek-flash", config["analysis"]["model"])
+            self.assertEqual(["quantum code", "fault-tolerant"], config["research"]["direction_terms"])
+            self.assertEqual("primary-model", config["analysis"]["model"])
 
     def test_setup_requires_a_reachable_academic_search_engine(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -242,7 +324,7 @@ class ScheduleTests(unittest.TestCase):
             data = home / "plugin-data" / "hermes-weekly-briefing"
             data.mkdir(parents=True)
             (data / "config.json").write_text(
-                '{"research":{"core_keywords":["smoke"]},"delivery":{"channel":"email","email_to":["a@example.com"]},"search":{"sources":["arxiv"]}}',
+                '{"research":{"core_keywords":["graph algorithms"]},"delivery":{"channel":"email","email_to":["a@example.com"]},"search":{"sources":["arxiv"]}}',
                 encoding="utf-8",
             )
             unavailable = {"ok": False, "ready_sources": [], "next_action": "configure an academic search engine"}

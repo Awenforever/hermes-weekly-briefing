@@ -31,7 +31,7 @@ if str(SCRIPT_DIR) not in sys.path:
 RUNTIME_PATH_RAW = str(os.environ.get("HERMES_WEEKLY_RUNTIME_PATH") or "").strip()
 RUNTIME_PATH = Path(RUNTIME_PATH_RAW).expanduser() if RUNTIME_PATH_RAW else None
 if RUNTIME_PATH is not None and RUNTIME_PATH.is_dir() and str(RUNTIME_PATH) not in sys.path:
-    sys.path.append(str(RUNTIME_PATH))
+    sys.path.insert(0, str(RUNTIME_PATH))
 
 from weekly_analysis_engine import analyze_papers, incomplete_analysis_ids
 
@@ -236,7 +236,7 @@ def arxiv_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for q in queries:
         # arXiv treats all:"multi word phrase" as an exact phrase, which returns 0 hits for
-        # every multi-word direction query ("wildfire smoke satellite segmentation" -> 0),
+        # every multi-word direction query ("quantum error correction benchmark" -> 0),
         # silently leaving only the generic config keywords and drifting the selection.
         # Use the term-wise AND form documented in references/is-paper-like-filter-failures.md.
         terms = [t for t in re.findall(r"[A-Za-z0-9][A-Za-z0-9.\-]*", q) if len(t) > 2]
@@ -648,7 +648,45 @@ def dedup_candidates(cands: list[dict[str, Any]]) -> list[dict[str, Any]]:
         item["authors"] = authors[:20]
     return list(merged.values())
 
-def build_queries(config: dict[str, Any], profile: dict[str, Any], feedback: dict[str, Any]) -> list[str]:
+def _user_feedback_biases(config: dict[str, Any], feedback: dict[str, Any]) -> list[dict[str, Any]]:
+    research_cfg = config.get("research", {}) if isinstance(config, dict) else {}
+    if research_cfg.get("use_user_feedback") is not True or not isinstance(feedback, dict):
+        return []
+    biases = feedback.get("biases")
+    if not isinstance(biases, list):
+        return []
+    return [
+        item for item in biases
+        if isinstance(item, dict)
+        and str(item.get("source") or "").casefold() == "user"
+        and str(item.get("topic") or item.get("keyword") or "").strip()
+    ]
+
+
+def feedback_score_adjustment(
+    candidate: dict[str, Any], config: dict[str, Any], feedback: dict[str, Any]
+) -> float:
+    """Apply only explicit, user-confirmed preferences to candidate ranking."""
+
+    text = " ".join(
+        str(candidate.get(key) or "") for key in ("title", "abstract", "venue")
+    ).casefold()
+    adjustment = 0.0
+    for item in _user_feedback_biases(config, feedback):
+        topic = str(item.get("topic") or item.get("keyword") or "").strip().casefold()
+        if not topic or topic not in text:
+            continue
+        direction = str(item.get("direction") or "").casefold()
+        if direction in {"increase", "boost"}:
+            adjustment += 1.0
+        elif direction == "force_explore":
+            adjustment += 0.5
+        elif direction in {"decrease", "suppress"}:
+            adjustment -= 2.0
+    return max(-4.0, min(2.0, adjustment))
+
+
+def build_queries(config: dict[str, Any], _profile: dict[str, Any], feedback: dict[str, Any]) -> list[str]:
     research_cfg = config.get("research", {}) if isinstance(config, dict) else {}
     explicit = research_cfg.get("search_queries") if isinstance(research_cfg.get("search_queries"), list) else []
     core = [str(value).strip() for value in research_cfg.get("core_keywords") or [] if str(value).strip()]
@@ -658,19 +696,11 @@ def build_queries(config: dict[str, Any], profile: dict[str, Any], feedback: dic
     for topic in core[:4]:
         base.extend(f"{topic} {method}" for method in methods[:2] if method.casefold() not in topic.casefold())
         base.extend(f"{topic} {interest}" for interest in cross[:1] if interest.casefold() not in topic.casefold())
-    weights = profile.get("topic_weights") if isinstance(profile, dict) else None
-    if research_cfg.get("use_profile_weights") is True and isinstance(weights, dict):
-        for k, v in sorted(weights.items(), key=lambda kv: -float(kv[1] or 0))[:4]:
-            base.append(str(k))
-    biases = feedback.get("biases") if isinstance(feedback, dict) else None
-    if research_cfg.get("use_user_feedback") is True and isinstance(biases, list):
-        for b in biases:
-            if (
-                isinstance(b, dict)
-                and str(b.get("source", "")).lower() == "user"
-                and str(b.get("direction","")).lower() in ("increase","force_explore","boost")
-            ):
-                base.append(str(b.get("topic") or b.get("keyword") or ""))
+    for item in _user_feedback_biases(config, feedback):
+        if str(item.get("direction") or "").casefold() in {
+            "increase", "force_explore", "boost",
+        }:
+            base.append(str(item.get("topic") or item.get("keyword") or ""))
     cleaned = []
     for q in base:
         q = normalize_title(str(q))
@@ -1524,12 +1554,11 @@ def main() -> int:
             "AGENTLY_WORKSPACE",
             str(delivery_settings.get("agently_workspace") or "hermes").strip(),
         )
-        profile = read_json(PROFILE_DIR / "current.json", {})
         feedback = read_json(PROFILE_DIR / "topic_feedback.json", {})
         dedup = read_json(PAPERS_DIR / "dedup.json", {})
         archive = read_json(PAPERS_DIR / "archive.json", {})
 
-        queries = build_queries(config, profile, feedback)
+        queries = build_queries(config, {}, feedback)
         log_event(run_log, type="queries", queries=queries)
 
         candidates = []
@@ -1631,7 +1660,9 @@ def main() -> int:
                 else:
                     off_direction.append(c)
                 continue
-            c["filter_score"] = score + freshness_bonus(c)
+            preference_adjustment = feedback_score_adjustment(c, config, feedback)
+            c["feedback_score_adjustment"] = preference_adjustment
+            c["filter_score"] = score + freshness_bonus(c) + preference_adjustment
             filtered.append(c)
 
         # Recency is the tiebreak inside a score band: without it, posts from 2025 with long

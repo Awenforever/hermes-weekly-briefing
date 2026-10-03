@@ -1,5 +1,5 @@
 name: hermes-weekly-briefing
-version: 4.6.8
+version: 4.7.0
 manifest_version: 1
 api_version: 1
 description: Research discovery, author-team context, polished PDF rendering, and email-only delivery.
@@ -13,10 +13,10 @@ config_schema:
     type: int
     default: 5
     description: Number of papers selected for each report.
-  use_profile_weights:
+  use_user_feedback:
     type: bool
     default: false
-    description: Allow an explicitly maintained research profile to influence discovery.
+    description: Allow only explicit, user-confirmed feedback records to influence discovery.
   delivery:
     type: str
     default: email

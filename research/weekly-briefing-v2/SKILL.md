@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 安装、个性化配置、运行并通过邮件交付研究论文周报；包含作者团队调研、可点击原文链接和中文 PDF。
-version: 4.6.8
+version: 4.7.0
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver
@@ -22,9 +22,10 @@ related_skills:
    - 收件邮箱；
    - 每期篇数；
    - 每周发送时间和时区；计划任务使用 Hermes profile 的 IANA 时区，若不一致须先说明影响并征得同意后调整 Hermes 时区；
-   - 模型提供方、主模型和备用模型（用户无偏好时保留默认）；
+   - 可选的主模型和备用模型（用户无偏好时留空，动态继承 Hermes 路由）；
    - 学术搜索源；优先复用能够实际探测成功的 arXiv、Crossref 或 Semantic Scholar，密钥仍由 Hermes/环境管理；
-   - 是否允许画像权重、是否允许明确的用户反馈影响排序。
+   - 已存在的显式反馈偏好（若有）；没有记录时不询问是否“开启学习”，新增第一条确认偏好时自动生效。
+   不得展示、暗示或推荐作者自己的研究词；只能记录用户主动给出的方向。
 4. 使用 `hermes weekly-briefing setup` 的对应参数写入设置。不要要求用户手写 JSON。
 5. 运行 `search-status` 实测学术发现来源；若全部不可用，必须引导用户选择支持的来源并配置网络出口或 Semantic Scholar API Key 环境变量，不能继续安装计划任务。
 6. 检查 PDF 运行依赖。若 `doctor` 报告缺失，说明将在插件自己的持久化数据目录安装隔离依赖，获得同意后运行 `runtime-install --yes`，再重新体检。不得把这些依赖装进 Hermes 核心虚拟环境。
@@ -46,8 +47,10 @@ related_skills:
 - 每期默认选择 3–5 篇，目标报告长度 8–14 页，内容多少优先于机械页数。
 - 没有逐篇深度分析时，生产交付必须失败；`--allow-shallow` 仅限调试。
 - “下周关注”只写追踪建议，不得自动修改核心研究方向。
-- 历史画像只有在 `research.use_profile_weights=true` 时才影响排序。
-- 反馈只有在 `research.use_user_feedback=true` 且来源明确为用户时才生效。
+- 不从普通聊天、历史周报或邮件回复自动推断研究画像。
+- 用户可以在任何 Hermes 对话渠道表达反馈，但必须先复述确认，再调用
+  `hermes weekly-briefing feedback`；不得把模型观察直接写成偏好。
+- 反馈保存在本插件数据目录，可查看、撤销和清空；邮件收件箱不属于本插件输入。
 
 ## 生产执行
 

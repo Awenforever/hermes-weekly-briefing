@@ -42,10 +42,10 @@ class AnalysisEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
             (home / "config.yaml").write_text(json.dumps({"custom_providers": [
-                {"name": "ustc", "base_url": "https://stub.invalid"},
-                {"name": "USTC", "base_url": "https://llm.example/v1", "api_key": "secret", "models": ["qwen3.6-chat"]},
+                {"name": "example", "base_url": "https://stub.invalid"},
+                {"name": "EXAMPLE", "base_url": "https://llm.example/v1", "api_key": "secret", "models": ["fallback-model"]},
             ]}), encoding="utf-8")
-            backend = engine.resolve_backend({"analysis": {"provider_name": "uStC"}}, home)
+            backend = engine.resolve_backend({"analysis": {"provider_name": "eXaMpLe"}}, home)
             self.assertEqual("hermes", backend["provider_name"])
             self.assertEqual("", backend["model"])
             self.assertEqual("", backend["fallback_model"])
@@ -55,7 +55,7 @@ class AnalysisEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
             (home / "config.yaml").write_text(json.dumps({"custom_providers": [{
-                "name": "USTC", "base_url": "https://llm.example/v1", "api_key": "top-secret", "models": ["qwen3.6-chat"]
+                "name": "EXAMPLE", "base_url": "https://llm.example/v1", "api_key": "top-secret", "models": ["fallback-model"]
             }]}), encoding="utf-8")
             returned = {"papers": {"title:test": _record()}}
             captured = {}
@@ -73,11 +73,11 @@ class AnalysisEngineTests(unittest.TestCase):
             self.assertIsNone(captured["model"])
             self.assertIn("不得虚构", captured["messages"][0]["content"])
 
-    def test_analysis_falls_back_to_qwen_and_records_provenance(self):
+    def test_analysis_falls_back_and_records_provenance(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
             (home / "config.yaml").write_text(json.dumps({"custom_providers": [{
-                "name": "USTC", "base_url": "https://llm.example/v1", "api_key": "secret"
+                "name": "EXAMPLE", "base_url": "https://llm.example/v1", "api_key": "secret"
             }]}), encoding="utf-8")
             returned = {"papers": {"title:test": _record()}}
             calls = []
@@ -108,14 +108,14 @@ class AnalysisEngineTests(unittest.TestCase):
                 payload = {"papers": {"title:one": _record("一")}, "narrative": {"overview": "总览"}}
             else:
                 payload = {"papers": {"title:two": _record("二")}}
-            kwargs["route_info"]["resolved_model"] = "deepseek-flash"
+            kwargs["route_info"]["resolved_model"] = "primary-model"
             return {"content": json.dumps(payload, ensure_ascii=False)}
         papers = [
             {"canonical_id": "title:one", "title": "One", "abstract": "A"},
             {"canonical_id": "title:two", "title": "Two", "abstract": "B"},
         ]
         with _router(call):
-            result, provenance = engine.analyze_papers(papers, {"analysis": {"model": "deepseek-flash", "fallback_model": "qwen"}}, Path("."))
+            result, provenance = engine.analyze_papers(papers, {"analysis": {"model": "primary-model", "fallback_model": "fallback-model"}}, Path("."))
         self.assertEqual([["title:one", "title:two"], ["title:two"]], calls)
         self.assertEqual({"title:one", "title:two"}, set(result["papers"]))
         self.assertEqual("总览", result["narrative"]["overview"])

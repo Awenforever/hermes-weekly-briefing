@@ -4,7 +4,6 @@ description: 学术研究周报分析规范与质量控制参考——Venue分�
 version: 3.0.0
 related_skills:
   - weekly-briefing-v2
-  - research-profile-engine
   - academic-report-render-deliver
   - academic-briefing-ops
 ---
@@ -35,8 +34,7 @@ related_skills:
 所有数据来自 `/opt/data/weekly-briefing/`：
 - `config.json` — 全局配置
 - `venues.json` — 关注会议/期刊 + 分级信息
-- `profile/current.json` — 当前画像
-- `profile/topic_feedback.json` — 搜索偏向
+- `profile/topic_feedback.json` — 用户明确确认的搜索偏好与抑制项
 - `papers/archive.json` — 历史论文索引
 - `papers/dedup.json` — 去重表
 - `papers/taxonomy.json` — 分类体系
@@ -61,7 +59,7 @@ related_skills:
 ### 第一阶段：搜索与筛选（步骤 1-8）
 1. 加载上下文
 2. 检查配置和数据完整性
-3. 读取研究画像和 topic_feedback
+3. 读取用户明确确认的 topic_feedback；不得从报告或普通聊天自动生成
 4. 生成搜索计划（4 类信号）
 5. 多源搜索（Semantic Scholar / arXiv / Exa / Crossref）
    - **直连优先**：用 `run_weekly_e2e.py --discovery-only` 获取候选
@@ -129,6 +127,6 @@ related_skills:
 ## Anti-Bias 机制
 
 - 反馈环隔离："下周关注"不自动反馈搜索
-- topic_feedback 安全护栏（权重边界 ≤1.3 / ≥0.3）
+- topic_feedback 只接受 `source=user`，并提供查看、撤销、清空和审计记录
 - 话题漂移检测：连续3周相同 → 触发远邻域注入
 - 多样性硬约束（重叠 ≤2，force_explore ≥1）

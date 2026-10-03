@@ -1,73 +1,30 @@
 {
-  "version": 1,
-  "_note": "Copy this template to $DATA_DIR/config.json and fill in your details. All $PLACEHOLDER values must be replaced.",
-  "paths": {
-    "skill_dir": "auto",
-    "data_dir": "$DATA_DIR",
-    "handoff_dir": "~/Work/Hermes"
-  },
-  "user": {
-    "display_name": "$YOUR_NAME",
-    "research_identity": "$YOUR_IDENTITY (e.g., PhD student, Professor, Researcher)",
-    "one_sentence_profile": "$YOUR_RESEARCH (one sentence describing your research direction)",
-    "language": "zh-CN",
-    "timezone": "Asia/Shanghai"
-  },
+  "version": 2,
+  "_note": "Reference only. Prefer `hermes weekly-briefing setup`; no research topic is supplied by the plugin.",
+  "max_selected": 5,
   "research": {
-    "_comment": "REQUIRED: Replace these with your own research keywords and methods",
     "core_keywords": [
-      "$YOUR_CORE_KEYWORD_1",
-      "$YOUR_CORE_KEYWORD_2",
-      "$YOUR_CORE_KEYWORD_3"
+      "$USER_SUPPLIED_RESEARCH_TOPIC"
     ],
     "direction_terms": [],
-    "method_keywords": [
-      "$YOUR_METHOD_1",
-      "$YOUR_METHOD_2",
-      "$YOUR_METHOD_3"
-    ],
-    "cross_domain_interests": [
-      "$YOUR_CROSS_DOMAIN_INTEREST_1",
-      "$YOUR_CROSS_DOMAIN_INTEREST_2"
-    ],
-    "required_sections": [
-      "paper_summary",
-      "paper_and_me",
-      "reproducibility",
-      "cross_paper_synthesis",
-      "submission_timeline"
-    ]
+    "method_keywords": [],
+    "cross_domain_interests": [],
+    "use_user_feedback": false
   },
   "search": {
-    "sources": ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"],
+    "sources": [
+      "openalex",
+      "semantic_scholar",
+      "crossref",
+      "arxiv",
+      "dblp",
+      "openreview"
+    ],
     "semantic_scholar_api_key_env": "SEMANTIC_SCHOLAR_API_KEY",
     "openalex_api_key_env": "OPENALEX_API_KEY",
     "scopus_api_key_env": "SCOPUS_API_KEY",
     "scopus_insttoken_env": "SCOPUS_INSTTOKEN",
-    "google_scholar_api_key_env": "SERPAPI_API_KEY",
-    "min_sources_per_run": 1,
-    "lookback_weeks": 3,
-    "citation_spike_threshold_per_week": 15
-  },
-  "selection": {
-    "normal_min": 3,
-    "normal_max": 5,
-    "harvest_max": 8,
-    "dry_week_min": 1,
-    "core_count": 3,
-    "cross_domain_count": 1,
-    "free_exploration_count": 1,
-    "max_overlap_with_previous_week": 2,
-    "baseline_reset_interval_weeks": 4,
-    "full_taxonomy_interval_weeks": 6,
-    "trend_brief_interval_weeks": 12
-  },
-  "style": {
-    "fixed_template": false,
-    "role": ["research assistant", "friend", "mentor"],
-    "allow_variable_mood": true,
-    "signature": "$YOUR_SIGNATURE (e.g., YourName or YourAssistantName)",
-    "email_subject_prefix": "⚚"
+    "google_scholar_api_key_env": "SERPAPI_API_KEY"
   },
   "analysis": {
     "auto": true,
@@ -79,6 +36,12 @@
   },
   "delivery": {
     "channel": "email",
-    "email_to": ["$YOUR_EMAIL"]
+    "email_to": [
+      "$USER_SUPPLIED_EMAIL"
+    ]
+  },
+  "schedule": {
+    "expression": "0 2 * * 5",
+    "timezone": "$INHERIT_HERMES_PROFILE_TIMEZONE"
   }
 }

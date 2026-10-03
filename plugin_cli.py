@@ -14,6 +14,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -77,8 +78,22 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup.add_argument("--scopus-api-key-env", default=None)
     setup.add_argument("--scopus-insttoken-env", default=None)
     setup.add_argument("--google-scholar-api-key-env", default=None)
-    setup.add_argument("--use-profile-weights", action=argparse.BooleanOptionalAction, default=None)
+    setup.add_argument(
+        "--use-profile-weights",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     setup.add_argument("--use-user-feedback", action=argparse.BooleanOptionalAction, default=None)
+    feedback = actions.add_parser(
+        "feedback",
+        help="List or explicitly update user-confirmed research preferences",
+    )
+    feedback.add_argument("--topic", action="append", default=[])
+    feedback.add_argument("--direction", choices=("more", "less", "explore"), default="more")
+    feedback.add_argument("--remove", action="append", default=[])
+    feedback.add_argument("--clear", action="store_true")
+    feedback.add_argument("--note", default="")
     init = actions.add_parser("init", help="Initialize configuration or migrate legacy Weekly Briefing data")
     init.add_argument("--email-to", action="append", default=[])
     init.add_argument("--keyword", action="append", default=[])
@@ -191,6 +206,11 @@ def _config_diagnostics() -> list[str]:
     unsupported = sorted(sources - SUPPORTED_SEARCH_SOURCES)
     if unsupported:
         errors.append("unsupported academic search sources: " + ", ".join(unsupported))
+    if research.get("use_profile_weights") is True:
+        errors.append(
+            "research.use_profile_weights is retired because no verified profile producer exists; "
+            "use explicit user-confirmed feedback instead"
+        )
     return errors
 
 
@@ -302,6 +322,117 @@ def _write_config(config: dict) -> None:
     temporary = path.with_suffix(".json.new")
     temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     temporary.replace(path)
+
+
+def _feedback_path() -> Path:
+    return _data() / "profile" / "topic_feedback.json"
+
+
+def _feedback_events_path() -> Path:
+    return _data() / "profile" / "feedback_events.jsonl"
+
+
+def _load_feedback() -> dict:
+    path = _feedback_path()
+    if not path.is_file():
+        return {"version": 1, "biases": []}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": 1, "biases": []}
+    return value if isinstance(value, dict) else {"version": 1, "biases": []}
+
+
+def _write_feedback(value: dict) -> None:
+    path = _feedback_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".json.new")
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    temporary.replace(path)
+
+
+def _record_feedback_event(event: dict) -> None:
+    path = _feedback_events_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _feedback_command(args: argparse.Namespace) -> int:
+    additions = [str(value).strip() for value in args.topic if str(value).strip()]
+    removals = [str(value).strip() for value in args.remove if str(value).strip()]
+    mutated = bool(args.clear or additions or removals)
+    if mutated and not _load_config():
+        print("Weekly Briefing must be configured before recording feedback", file=sys.stderr)
+        return 2
+    if args.clear and (additions or removals):
+        print("--clear cannot be combined with --topic or --remove", file=sys.stderr)
+        return 2
+    feedback = _load_feedback()
+    current = feedback.get("biases") if isinstance(feedback.get("biases"), list) else []
+    biases = [item for item in current if isinstance(item, dict)]
+    now = datetime.now(timezone.utc).isoformat()
+    events: list[dict] = []
+
+    if args.clear:
+        biases = []
+        events.append({"action": "clear", "source": "user", "recorded_at": now})
+    else:
+        remove_keys = {value.casefold() for value in removals}
+        if remove_keys:
+            biases = [
+                item for item in biases
+                if str(item.get("topic") or item.get("keyword") or "").strip().casefold()
+                not in remove_keys
+            ]
+            events.extend(
+                {"action": "remove", "source": "user", "topic": value, "recorded_at": now}
+                for value in removals
+            )
+        direction = {
+            "more": "increase",
+            "less": "decrease",
+            "explore": "force_explore",
+        }[args.direction]
+        for topic in additions:
+            key = topic.casefold()
+            biases = [
+                item for item in biases
+                if str(item.get("topic") or item.get("keyword") or "").strip().casefold() != key
+            ]
+            item = {
+                "source": "user",
+                "direction": direction,
+                "topic": topic,
+                "updated_at": now,
+            }
+            if str(args.note or "").strip():
+                item["note"] = str(args.note).strip()
+            biases.append(item)
+            events.append({"action": "set", **item, "recorded_at": now})
+
+    if mutated:
+        feedback = {"version": 1, "biases": biases, "updated_at": now}
+        _write_feedback(feedback)
+        for event in events:
+            _record_feedback_event(event)
+        config = _load_config()
+        research = config.setdefault("research", {})
+        research["use_user_feedback"] = bool(biases)
+        research.pop("use_profile_weights", None)
+        _write_config(config)
+
+    print(json.dumps({
+        "ok": True,
+        "enabled": bool((_load_config().get("research") or {}).get("use_user_feedback")),
+        "feedback": _load_feedback(),
+        "collection": "explicit user-confirmed command; email replies are not monitored",
+    }, ensure_ascii=False, indent=2))
+    return 0
 
 
 def _find_agently_cli() -> str | None:
@@ -432,15 +563,28 @@ def _model_status(config: dict) -> dict:
 
 def _renderer_status() -> dict:
     runtime = _runtime_path()
-    probe = (
-        "import importlib, json, sys; "
-        f"sys.path.append({str(runtime)!r}); "
-        "result={}; "
-        "exec(\"for name in ('weasyprint','reportlab'):\\n"
-        " try:\\n  importlib.import_module(name); result[name]=True\\n"
-        " except Exception as exc:\\n  result[name]=False\"); "
-        "print(json.dumps(result))"
-    )
+    probe = f"""
+import importlib
+import json
+import sys
+from pathlib import Path
+
+runtime = Path({str(runtime)!r}).resolve()
+sys.path.insert(0, str(runtime))
+result = {{}}
+for name in ("weasyprint", "reportlab"):
+    try:
+        module = importlib.import_module(name)
+        origin = Path(module.__file__).resolve()
+        result[name] = {{
+            "available": True,
+            "isolated": origin == runtime or runtime in origin.parents,
+            "origin": str(origin),
+        }}
+    except Exception as exc:
+        result[name] = {{"available": False, "isolated": False, "error": str(exc)}}
+print(json.dumps(result))
+"""
     try:
         completed = subprocess.run(
             [sys.executable, "-c", probe], text=True, encoding="utf-8",
@@ -451,12 +595,31 @@ def _renderer_status() -> dict:
         result = json.loads(lines[-1]) if completed.returncode == 0 and lines else {}
     except Exception:
         result = {}
-    available = [name for name in ("weasyprint", "reportlab") if result.get(name)]
+    isolated = [
+        name for name in ("weasyprint", "reportlab")
+        if isinstance(result.get(name), dict) and result[name].get("isolated") is True
+    ]
+    host_available = [
+        name for name in ("weasyprint", "reportlab")
+        if isinstance(result.get(name), dict)
+        and result[name].get("available") is True
+        and result[name].get("isolated") is not True
+    ]
     return {
-        "ready": bool(available),
-        "available": available,
+        "ready": bool(isolated),
+        "available": isolated,
+        "host_available": host_available,
+        "origins": {
+            name: value.get("origin")
+            for name, value in result.items()
+            if isinstance(value, dict) and value.get("origin")
+        },
         "runtime": str(runtime),
-        "isolated": True,
+        "isolated": bool(isolated),
+        "diagnostic": (
+            "plugin-owned PDF runtime is ready" if isolated else
+            "run runtime-install --yes; packages found only in Hermes core are not persistent"
+        ),
     }
 
 
@@ -519,7 +682,7 @@ def _doctor_result() -> dict:
     if not model["ready"]:
         errors.append("analysis provider is not ready")
     if not renderer["ready"]:
-        errors.append("no PDF renderer is available")
+        errors.append("plugin-owned PDF renderer is not installed")
     if not search["ok"]:
         errors.append("no configured academic search engine is reachable")
     if requested_timezone and requested_timezone != profile_timezone:
@@ -627,7 +790,13 @@ def _configure(args: argparse.Namespace) -> int:
         if value:
             search[config_name] = str(value).strip()
     if args.use_profile_weights is not None:
-        research["use_profile_weights"] = args.use_profile_weights
+        if args.use_profile_weights:
+            print(
+                "Automatic profile weighting is not supported; use the explicit feedback command",
+                file=sys.stderr,
+            )
+            return 2
+        research.pop("use_profile_weights", None)
     if args.use_user_feedback is not None:
         research["use_user_feedback"] = args.use_user_feedback
     _write_config(config)
@@ -657,7 +826,7 @@ def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> 
             config = {
                 "version": 2,
                 "max_selected": 5,
-                "research": {"core_keywords": clean_keywords, "use_profile_weights": False, "use_user_feedback": False},
+                "research": {"core_keywords": clean_keywords, "use_user_feedback": False},
                 "analysis": {"auto": True, "provider_name": "hermes", "model": "", "fallback_model": "", "timeout_seconds": 180, "max_tokens": 7000},
                 "search": {
                     "sources": ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"],
@@ -668,7 +837,7 @@ def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> 
                     "google_scholar_api_key_env": "SERPAPI_API_KEY",
                 },
                 "delivery": {"channel": "email", "email_to": clean_emails},
-                "schedule": {"expression": "0 2 * * 5", "timezone": "Asia/Shanghai"},
+                "schedule": {"expression": "0 2 * * 5", "timezone": _profile_timezone()},
             }
             _write_config(config)
     errors = _config_diagnostics()
@@ -754,6 +923,8 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
             return _configure(args)
         print(json.dumps(_setup_status(), ensure_ascii=False, indent=2))
         return 0
+    if action == "feedback":
+        return _feedback_command(args)
     if action == "doctor":
         result = _doctor_result()
         print(json.dumps(result, ensure_ascii=False, indent=2))
