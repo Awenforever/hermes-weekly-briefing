@@ -655,18 +655,19 @@ def _profile_timezone() -> str:
     if os.environ.get("HERMES_TIMEZONE"):
         return str(os.environ["HERMES_TIMEZONE"]).strip()
     path = _home() / "config.yaml"
-    if not path.is_file():
-        return ""
-    text = path.read_text(encoding="utf-8")
-    try:
-        import yaml
-        value = yaml.safe_load(text)
-        if isinstance(value, dict):
-            return str(value.get("timezone") or "").strip()
-    except Exception:
-        pass
-    match = re.search(r"(?m)^\s*timezone\s*:\s*['\"]?([^'\"#\r\n]+)", text)
-    return match.group(1).strip() if match else ""
+    if path.is_file():
+        text = path.read_text(encoding="utf-8")
+        try:
+            import yaml
+            value = yaml.safe_load(text)
+            if isinstance(value, dict) and str(value.get("timezone") or "").strip():
+                return str(value["timezone"]).strip()
+        except Exception:
+            pass
+        match = re.search(r"(?m)^\s*timezone\s*:\s*['\"]?([^'\"#\r\n]+)", text)
+        if match:
+            return match.group(1).strip()
+    return str(os.environ.get("TZ") or "").strip()
 
 
 def _doctor_result() -> dict:

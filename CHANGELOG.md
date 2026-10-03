@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.7.1 - 2026-10-03
+
+- Recognize the standard container `TZ` value when no Hermes-specific timezone
+  is present, while keeping an actually missing timezone as a setup blocker.
+
 ## 4.7.0 - 2026-10-03
 
 - Removed developer research topics and examples from the public setup surface.

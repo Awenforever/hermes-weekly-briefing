@@ -237,6 +237,12 @@ class ScheduleTests(unittest.TestCase):
                 errors = plugin._config_diagnostics()
             self.assertIn("schedule.timezone needs an explicit IANA timezone", errors)
 
+    def test_profile_timezone_falls_back_to_standard_container_tz(self):
+        with tempfile.TemporaryDirectory() as raw, mock.patch.object(
+            plugin, "_home", return_value=Path(raw)
+        ), mock.patch.dict(plugin.os.environ, {"TZ": "Europe/Berlin"}, clear=True):
+            self.assertEqual("Europe/Berlin", plugin._profile_timezone())
+
     def test_explicit_feedback_is_auditable_reversible_and_enables_itself(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)

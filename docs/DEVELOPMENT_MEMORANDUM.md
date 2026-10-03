@@ -61,6 +61,9 @@ Every public release must prove that:
 - new installs inherit Hermes model routing and profile timezone;
 - if the profile has no timezone, setup remains unresolved until the user
   chooses an explicit IANA timezone;
+- Docker's standard `TZ` value is a valid last-resort profile timezone after
+  `HERMES_TIMEZONE` and `config.yaml`; do not mistake a configured container
+  timezone for a missing value;
 - feedback add/list/remove/clear is persistent and auditable;
 - negative feedback changes ranking while positive/explore feedback can extend
   discovery;
