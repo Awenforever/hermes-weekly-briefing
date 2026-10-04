@@ -20,8 +20,23 @@ from pathlib import Path
 
 SUPPORTED_SEARCH_SOURCES = {
     "arxiv", "crossref", "semantic_scholar", "openalex", "dblp",
-    "openreview", "scopus", "google_scholar",
+    "openreview", "scopus", "google_scholar", "europe_pmc", "core",
+    "hal", "zenodo", "datacite",
 }
+
+SOURCE_GUIDANCE = {
+    "general": ["openalex", "crossref", "semantic_scholar"],
+    "computer_science": ["arxiv", "dblp", "openreview"],
+    "life_sciences": ["europe_pmc"],
+    "open_access_fulltext": ["core", "hal"],
+    "research_outputs_and_dois": ["zenodo", "datacite"],
+    "credentialed_optional": ["scopus", "google_scholar"],
+}
+
+DEFAULT_SEARCH_SOURCES = [
+    "openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview",
+    "europe_pmc", "core", "hal", "zenodo", "datacite",
+]
 
 
 def _trusted_ssl_context() -> ssl.SSLContext:
@@ -66,6 +81,17 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup.add_argument("--email-to", action="append", default=[])
     setup.add_argument("--keyword", action="append", default=[])
     setup.add_argument("--direction-term", action="append", default=[])
+    setup.add_argument(
+        "--require-all", action="append", default=[], metavar="TERM|SYNONYM",
+        help="Require one synonym from this group; repeat the option for AND across concepts",
+    )
+    setup.add_argument("--require-any", action="append", default=[])
+    setup.add_argument("--exclude-term", action="append", default=[])
+    setup.add_argument("--minimum-any", type=int, default=None)
+    setup.add_argument(
+        "--match-field", action="append", default=[],
+        choices=("title", "abstract", "keywords", "venue"),
+    )
     setup.add_argument("--max-selected", type=int, default=None)
     setup.add_argument("--timezone", default=None)
     setup.add_argument("--schedule", default=None)
@@ -75,6 +101,7 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup.add_argument("--search-source", action="append", default=[])
     setup.add_argument("--semantic-scholar-api-key-env", default=None)
     setup.add_argument("--openalex-api-key-env", default=None)
+    setup.add_argument("--core-api-key-env", default=None)
     setup.add_argument("--scopus-api-key-env", default=None)
     setup.add_argument("--scopus-insttoken-env", default=None)
     setup.add_argument("--google-scholar-api-key-env", default=None)
@@ -199,7 +226,7 @@ def _config_diagnostics() -> list[str]:
     if not configured_timezone or "$" in configured_timezone:
         errors.append("schedule.timezone needs an explicit IANA timezone")
     search = config.get("search") if isinstance(config.get("search"), dict) else {}
-    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"]
+    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else DEFAULT_SEARCH_SOURCES
     sources = {
         str(value).strip().casefold().replace("-", "_")
         for value in raw_sources
@@ -215,12 +242,25 @@ def _config_diagnostics() -> list[str]:
             "research.use_profile_weights is retired because no verified profile producer exists; "
             "use explicit user-confirmed feedback instead"
         )
+    relevance = research.get("relevance") if isinstance(research.get("relevance"), dict) else None
+    if relevance is not None:
+        groups = relevance.get("all_groups") if isinstance(relevance.get("all_groups"), list) else []
+        for index, group in enumerate(groups, start=1):
+            if not isinstance(group, list) or not any(str(value).strip() for value in group):
+                errors.append(f"research.relevance.all_groups[{index}] needs at least one term")
+        any_terms = relevance.get("any_terms") if isinstance(relevance.get("any_terms"), list) else []
+        try:
+            minimum_any = int(relevance.get("minimum_any") or 0)
+        except (TypeError, ValueError):
+            minimum_any = -1
+        if minimum_any < 0 or minimum_any > len([term for term in any_terms if str(term).strip()]):
+            errors.append("research.relevance.minimum_any must be between zero and the any-term count")
     return errors
 
 
 def _search_status(config: dict, probe: bool = True) -> dict:
     search = config.get("search") if isinstance(config.get("search"), dict) else {}
-    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"]
+    raw_sources = search.get("sources") if isinstance(search.get("sources"), list) else DEFAULT_SEARCH_SOURCES
     sources = [
         str(value).strip().casefold().replace("-", "_")
         for value in raw_sources
@@ -235,6 +275,11 @@ def _search_status(config: dict, probe: bool = True) -> dict:
         "openreview": "https://api2.openreview.net/notes/search?term=test&content=title&source=forum&limit=1",
         "scopus": "https://api.elsevier.com/content/search/scopus?query=TITLE-ABS-KEY%28test%29&count=1",
         "google_scholar": "https://serpapi.com/search.json?engine=google_scholar&q=test&num=1",
+        "europe_pmc": "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=test&format=json&pageSize=1",
+        "core": "https://api.core.ac.uk/v3/search/works?q=test&limit=1",
+        "hal": "https://api.hal.science/search/?q=test&wt=json&rows=1",
+        "zenodo": "https://zenodo.org/api/records?q=test&size=1",
+        "datacite": "https://api.datacite.org/dois?query=test&page%5Bsize%5D=1",
     }
     details = []
     for source in sources:
@@ -256,6 +301,12 @@ def _search_status(config: dict, probe: bool = True) -> dict:
             item["credential"] = "configured" if key else "anonymous"
         elif source == "openalex":
             key_env = str(search.get("openalex_api_key_env") or "OPENALEX_API_KEY").strip()
+            key = str(os.environ.get(key_env) or "").strip()
+            if key:
+                headers["Authorization"] = "Bearer " + key
+            item["credential"] = "configured" if key else "anonymous"
+        elif source == "core":
+            key_env = str(search.get("core_api_key_env") or "CORE_API_KEY").strip()
             key = str(os.environ.get(key_env) or "").strip()
             if key:
                 headers["Authorization"] = "Bearer " + key
@@ -301,10 +352,12 @@ def _search_status(config: dict, probe: bool = True) -> dict:
         "configured_sources": sources,
         "ready_sources": ready,
         "engines": details,
+        "source_guidance": SOURCE_GUIDANCE,
+        "openalex_key_signup": "https://openalex.org/settings/api",
         "next_action": (
             "academic discovery is ready"
             if ready else
-            "configure at least one supported engine and its optional credential; open sources include OpenAlex, Semantic Scholar, DBLP, OpenReview, Crossref and arXiv"
+            "choose sources by research coverage and configure any optional credential; production OpenAlex keys are free at https://openalex.org/settings/api"
         ),
     }
 
@@ -767,6 +820,29 @@ def _configure(args: argparse.Namespace) -> int:
         research["core_keywords"] = [str(value).strip() for value in args.keyword if str(value).strip()]
     if getattr(args, "direction_term", None):
         research["direction_terms"] = [str(value).strip() for value in args.direction_term if str(value).strip()]
+    relevance_requested = any((
+        getattr(args, "require_all", None), getattr(args, "require_any", None),
+        getattr(args, "exclude_term", None), getattr(args, "match_field", None),
+        getattr(args, "minimum_any", None) is not None,
+    ))
+    if relevance_requested:
+        relevance = research.setdefault("relevance", {})
+        if args.require_all:
+            relevance["all_groups"] = [
+                [term.strip() for term in str(group).split("|") if term.strip()]
+                for group in args.require_all if str(group).strip()
+            ]
+        if args.require_any:
+            relevance["any_terms"] = [
+                term.strip() for value in args.require_any
+                for term in str(value).split("|") if term.strip()
+            ]
+        if args.exclude_term:
+            relevance["none_terms"] = [str(value).strip() for value in args.exclude_term if str(value).strip()]
+        if args.minimum_any is not None:
+            relevance["minimum_any"] = max(0, args.minimum_any)
+        if args.match_field:
+            relevance["fields"] = list(dict.fromkeys(args.match_field))
     if args.max_selected is not None:
         config["max_selected"] = max(1, min(10, args.max_selected))
     if args.timezone:
@@ -789,6 +865,7 @@ def _configure(args: argparse.Namespace) -> int:
         search["semantic_scholar_api_key_env"] = str(args.semantic_scholar_api_key_env).strip()
     for arg_name, config_name in (
         ("openalex_api_key_env", "openalex_api_key_env"),
+        ("core_api_key_env", "core_api_key_env"),
         ("scopus_api_key_env", "scopus_api_key_env"),
         ("scopus_insttoken_env", "scopus_insttoken_env"),
         ("google_scholar_api_key_env", "google_scholar_api_key_env"),
@@ -836,9 +913,10 @@ def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> 
                 "research": {"core_keywords": clean_keywords, "use_user_feedback": False},
                 "analysis": {"auto": True, "provider_name": "hermes", "model": "", "fallback_model": "", "timeout_seconds": 180, "max_tokens": 7000},
                 "search": {
-                    "sources": ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"],
+                    "sources": list(DEFAULT_SEARCH_SOURCES),
                     "semantic_scholar_api_key_env": "SEMANTIC_SCHOLAR_API_KEY",
                     "openalex_api_key_env": "OPENALEX_API_KEY",
+                    "core_api_key_env": "CORE_API_KEY",
                     "scopus_api_key_env": "SCOPUS_API_KEY",
                     "scopus_insttoken_env": "SCOPUS_INSTTOKEN",
                     "google_scholar_api_key_env": "SERPAPI_API_KEY",
@@ -919,10 +997,11 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
         supplied = any(
             getattr(args, name, None) not in (None, [], "")
             for name in (
-                "email_to", "keyword", "direction_term", "max_selected", "timezone", "schedule", "provider",
+                "email_to", "keyword", "direction_term", "require_all", "require_any",
+                "exclude_term", "minimum_any", "match_field", "max_selected", "timezone", "schedule", "provider",
                 "model", "fallback_model", "use_profile_weights", "use_user_feedback",
                 "search_source", "semantic_scholar_api_key_env",
-                "openalex_api_key_env", "scopus_api_key_env", "scopus_insttoken_env",
+                "openalex_api_key_env", "core_api_key_env", "scopus_api_key_env", "scopus_insttoken_env",
                 "google_scholar_api_key_env",
             )
         )

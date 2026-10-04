@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.8.0 - 2026-10-04
+
+- adds deterministic Boolean relevance policies with AND-across-concept groups,
+  OR-within-synonyms, minimum-any, NOT exclusions, and configurable fields;
+- pushes required concept combinations into discovery queries and revalidates
+  every candidate after retrieval;
+- requires strict concepts to co-occur in one semantic segment and rejects
+  oversized, repetitive, code-like, or agent-directed repository payloads
+  before any model call;
+- adds official API adapters for Europe PMC, CORE, HAL, Zenodo, and DataCite;
+- expands guided source selection and adds the official OpenAlex key link.
+
 ## 4.7.2 - 2026-10-03
 
 - Treat an empty `timezone: ''` configuration value as absent so Docker's

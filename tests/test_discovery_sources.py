@@ -88,9 +88,50 @@ class DiscoverySourceTests(unittest.TestCase):
             self.assertEqual([], runner.semantic_scholar_search(["one", "two", "three"], 1))
         self.assertEqual(2, open_url.call_count)
 
+    def test_europe_pmc_parser_keeps_abstract_and_identity(self):
+        payload = {"resultList": {"result": [{
+            "title": "Biomedical graph study", "abstractText": "Detailed evidence.",
+            "doi": "10.1000/biomed", "firstPublicationDate": "2026-09-01",
+            "authorList": {"author": [{"fullName": "A. Researcher"}]},
+            "journalTitle": "Example Medicine",
+        }]}}
+        with mock.patch.object(runner, "fetch_url", return_value=(200, "application/json", json.dumps(payload))):
+            rows = runner.europe_pmc_search(["biomedical graph"], 1)
+        self.assertEqual("Detailed evidence.", rows[0]["abstract"])
+        self.assertEqual(["A. Researcher"], rows[0]["authors"])
+        self.assertEqual("10.1000/biomed", rows[0]["doi"])
+
+    def test_open_repository_parsers_use_official_json_shapes(self):
+        hal_payload = {"response": {"docs": [{
+            "title_s": ["HAL paper"], "abstract_s": ["HAL abstract"],
+            "doiId_s": "10.1000/hal", "authFullName_s": ["HAL Author"],
+            "producedDate_tdate": "2026-09-01T00:00:00Z",
+        }]}}
+        zenodo_payload = {"hits": {"hits": [{
+            "metadata": {"title": "Zenodo paper", "description": "<p>Open evidence</p>",
+                         "doi": "10.1000/zenodo", "creators": [{"name": "Z. Author"}]},
+            "links": {"html": "https://zenodo.org/records/1"},
+        }]}}
+        datacite_payload = {"data": [{"id": "10.1000/data", "attributes": {
+            "doi": "10.1000/data", "titles": [{"title": "DataCite paper"}],
+            "descriptions": [{"description": "Metadata evidence"}],
+            "creators": [{"name": "D. Author"}], "publicationYear": 2026,
+        }}]}
+        with mock.patch.object(runner, "fetch_url", side_effect=[
+            (200, "application/json", json.dumps(hal_payload)),
+            (200, "application/json", json.dumps(zenodo_payload)),
+            (200, "application/json", json.dumps(datacite_payload)),
+        ]):
+            hal = runner.hal_search(["topic"], 1)
+            zenodo = runner.zenodo_search(["topic"], 1)
+            datacite = runner.datacite_search(["topic"], 1)
+        self.assertEqual("HAL paper", hal[0]["title"])
+        self.assertEqual("Open evidence", zenodo[0]["abstract"])
+        self.assertEqual(["D. Author"], datacite[0]["authors"])
+
     def test_source_executor_is_bounded_and_keeps_adapter_queries_serial(self):
         source = RUNNER.read_text(encoding="utf-8")
-        self.assertIn("ThreadPoolExecutor(max_workers=max(1, min(6, len(discovery_tasks))))", source)
+        self.assertIn("ThreadPoolExecutor(max_workers=max(1, min(8, len(discovery_tasks))))", source)
         self.assertIn("query_window = queries[:6]", source)
         self.assertIn("for query in queries:", source)
 

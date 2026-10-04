@@ -6,6 +6,7 @@ import argparse
 import datetime as dt
 import email.utils
 import html
+import itertools
 import json
 import os
 import re
@@ -52,6 +53,7 @@ ACADEMIC_DOMAINS = {
     "frontiersin.org", "copernicus.org", "agu.org", "egu.eu",
     "neurips.cc", "openaccess.thecvf.com", "eartharxiv", "essopenarchive.org",
     "openalex.org", "dblp.org", "openreview.net", "scopus.com",
+    "europepmc.org", "core.ac.uk", "hal.science", "zenodo.org", "datacite.org",
 }
 NON_ACADEMIC_DOMAINS = {
     "github.com", "youtube.com", "twitter.com", "linkedin.com", "medium.com",
@@ -62,6 +64,10 @@ NON_ACADEMIC_DOMAINS = {
 # Candidates published after the current year are pipeline artefacts (Crossref
 # "sort=published&order=desc" serves future-dated records) and must never be selected.
 FRESH_WINDOW_DAYS = 180
+DEFAULT_SEARCH_SOURCES = [
+    "openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview",
+    "europe_pmc", "core", "hal", "zenodo", "datacite",
+]
 
 
 def trusted_ssl_context() -> ssl.SSLContext:
@@ -88,6 +94,126 @@ def direction_terms(config: dict[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(derived))
 
 
+def relevance_policy(config: dict[str, Any]) -> dict[str, Any]:
+    """Return a normalized, auditable Boolean relevance policy.
+
+    ``all_groups`` is AND across groups and OR within each group, which lets a
+    user require several concepts while retaining synonyms. ``any_terms`` is a
+    separate pool controlled by ``minimum_any``; ``none_terms`` is a hard NOT.
+    Existing installations without this block retain their legacy one-of
+    direction-term behavior and title-only matching.
+    """
+    research = config.get("research") if isinstance(config.get("research"), dict) else {}
+    raw = research.get("relevance") if isinstance(research.get("relevance"), dict) else None
+    if raw is None:
+        terms = list(direction_terms(config))
+        return {
+            "all_groups": [], "any_terms": terms, "minimum_any": 1 if terms else 0,
+            "none_terms": [], "fields": ["title"], "legacy": True,
+        }
+
+    groups: list[list[str]] = []
+    for value in raw.get("all_groups") or []:
+        values = value if isinstance(value, list) else [value]
+        group = list(dict.fromkeys(
+            str(term).strip() for term in values if str(term).strip()
+        ))
+        if group:
+            groups.append(group)
+    any_terms = list(dict.fromkeys(
+        str(term).strip() for term in (raw.get("any_terms") or []) if str(term).strip()
+    ))
+    none_terms = list(dict.fromkeys(
+        str(term).strip() for term in (raw.get("none_terms") or []) if str(term).strip()
+    ))
+    allowed_fields = {"title", "abstract", "keywords", "venue"}
+    fields = [
+        str(field).strip().casefold() for field in (raw.get("fields") or ["title", "abstract", "keywords"])
+        if str(field).strip().casefold() in allowed_fields
+    ] or ["title", "abstract", "keywords"]
+    try:
+        minimum_any = int(raw.get("minimum_any", 1 if any_terms else 0))
+    except (TypeError, ValueError):
+        minimum_any = 1 if any_terms else 0
+    return {
+        "all_groups": groups,
+        "any_terms": any_terms,
+        "minimum_any": max(0, min(len(any_terms), minimum_any)),
+        "none_terms": none_terms,
+        "fields": list(dict.fromkeys(fields)),
+        "concept_scope": str(raw.get("concept_scope") or "same_segment").strip().casefold(),
+        "legacy": False,
+    }
+
+
+def _match_text(value: Any) -> str:
+    return " ".join(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(value or "").casefold()))
+
+
+def _term_matches(text: str, term: str) -> bool:
+    normalized = _match_text(term)
+    if not normalized:
+        return False
+    # Punctuation and hyphen variants normalize to spaces, but word boundaries
+    # remain intact ("flow" cannot accidentally match "workflow").
+    return f" {normalized} " in f" {text} "
+
+
+def _candidate_segments(candidate: dict[str, Any], fields: list[str]) -> list[str]:
+    segments: list[str] = []
+    for field in fields:
+        value = candidate.get(field)
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            raw = str(item or "").strip()
+            if not raw:
+                continue
+            if field == "abstract":
+                # A same-sentence/paragraph relation is stronger than unrelated
+                # terms appearing somewhere in a long abstract.
+                parts = re.split(r"(?<=[.!?。！？])\s+|\n+", raw)
+                segments.extend(_match_text(part) for part in parts if _match_text(part))
+            else:
+                normalized = _match_text(raw)
+                if normalized:
+                    segments.append(normalized)
+    return segments
+
+
+def metadata_integrity_verdict(candidate: dict[str, Any]) -> tuple[bool, str]:
+    """Reject untrusted repository metadata that is not safe paper evidence.
+
+    Academic metadata is external data, never instructions. The gate is source
+    neutral: it bounds abstract size, code density, repeated payloads, and text
+    that explicitly addresses automated agents with control instructions.
+    """
+    abstract = str(candidate.get("abstract") or "")
+    if len(abstract) > 12000:
+        return False, "metadata_oversized"
+    folded = abstract.casefold()
+    code_tokens = sum(folded.count(token) for token in (
+        " import ", " def ", " class ", "if __name__", "```", "<meta ",
+        "async def ", "response.headers", "system instruction",
+    ))
+    if code_tokens >= 5:
+        return False, "metadata_code_payload"
+    agent_terms = any(term in folded for term in (
+        "language model", "llm", "ai agent", "crawler", "transformer",
+    ))
+    control_terms = any(term in folded for term in (
+        "ignore previous", "system override", "must forcibly", "execute absolute",
+        "overwrite weights", "inject payload", "hidden dom", "prompt injection",
+    ))
+    if agent_terms and control_terms:
+        return False, "metadata_instruction_payload"
+    compact = re.sub(r"\s+", " ", folded).strip()
+    if len(compact) > 2000:
+        blocks = [compact[index:index + 240] for index in range(0, len(compact) - 239, 240)]
+        if blocks and len(set(blocks)) < len(blocks) * 0.65:
+            return False, "metadata_repetition_payload"
+    return True, "metadata_integrity_ok"
+
+
 def _published_date(c: dict[str, Any]) -> dt.date | None:
     raw = str(c.get("published") or "").strip()
     if not raw:
@@ -107,23 +233,44 @@ def _published_date(c: dict[str, Any]) -> dt.date | None:
     return None
 
 
-def direction_verdict(c: dict[str, Any], terms: tuple[str, ...]) -> tuple[bool, str]:
-    """Apply the user-configured relevance and future-date gates."""
-    title = str(c.get("title") or "").lower()
-    hits = []
-    for term in terms:
-        if term in title:
-            hits.append(term)
-            continue
-        words = [word for word in re.findall(r"[a-z0-9\u4e00-\u9fff]+", term) if len(word) > 2]
-        if len(words) >= 2 and all(word in title for word in words):
-            hits.append(term)
-    if not hits:
-        return False, "off_direction"
+def direction_verdict(c: dict[str, Any], policy: Any) -> tuple[bool, str]:
+    """Apply Boolean relevance and future-date gates without model guessing."""
+    if not isinstance(policy, dict):
+        terms = [str(term) for term in (policy or ())]
+        policy = {
+            "all_groups": [], "any_terms": terms, "minimum_any": 1 if terms else 0,
+            "none_terms": [], "fields": ["title"], "legacy": True,
+        }
+    parts = []
+    for field in policy.get("fields") or ["title"]:
+        value = c.get(field)
+        if isinstance(value, list):
+            parts.extend(str(item) for item in value)
+        else:
+            parts.append(str(value or ""))
+    text = _match_text(" ".join(parts))
+    excluded = [term for term in policy.get("none_terms") or [] if _term_matches(text, term)]
+    if excluded:
+        return False, "excluded:" + excluded[0]
+    for index, group in enumerate(policy.get("all_groups") or [], start=1):
+        if not any(_term_matches(text, term) for term in group):
+            return False, f"missing_required_group:{index}"
+    groups = policy.get("all_groups") or []
+    if len(groups) > 1 and policy.get("concept_scope", "same_segment") == "same_segment":
+        segments = _candidate_segments(c, policy.get("fields") or ["title"])
+        if not any(
+            all(any(_term_matches(segment, term) for term in group) for group in groups)
+            for segment in segments
+        ):
+            return False, "required_concepts_not_related"
+    any_terms = policy.get("any_terms") or []
+    any_hits = [term for term in any_terms if _term_matches(text, term)]
+    if len(any_hits) < int(policy.get("minimum_any") or 0):
+        return False, f"minimum_any:{len(any_hits)}/{int(policy.get('minimum_any') or 0)}"
     published = _published_date(c)
     if published and published.year > dt.date.today().year:
         return False, "future_dated:" + published.isoformat()
-    return True, "on_direction"
+    return True, "on_direction_boolean" if not policy.get("legacy") else "on_direction"
 
 
 def freshness_bonus(c: dict[str, Any]) -> int:
@@ -506,6 +653,210 @@ def openreview_search(queries: list[str], max_each: int = 5) -> list[dict[str, A
     return out
 
 
+def europe_pmc_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
+    """Search the official Europe PMC API for life-science papers and preprints."""
+    out: list[dict[str, Any]] = []
+    for query in queries:
+        params = urllib.parse.urlencode({
+            "query": f"({query}) sort_date:y", "format": "json",
+            "resultType": "core", "pageSize": max_each,
+        })
+        code, _ctype, text = fetch_url(
+            "https://www.ebi.ac.uk/europepmc/webservices/rest/search?" + params,
+            timeout=25,
+        )
+        if code != 200:
+            continue
+        try:
+            records = json.loads(text).get("resultList", {}).get("result", [])
+        except Exception:
+            continue
+        for item in records if isinstance(records, list) else []:
+            if not isinstance(item, dict):
+                continue
+            author_list = item.get("authorList") if isinstance(item.get("authorList"), dict) else {}
+            authors = [
+                str(author.get("fullName") or author.get("lastName") or "").strip()
+                for author in author_list.get("author") or [] if isinstance(author, dict)
+            ]
+            doi = str(item.get("doi") or "").strip()
+            pmcid = str(item.get("pmcid") or "").strip()
+            ext_id = str(item.get("id") or "").strip()
+            out.append({
+                "title": normalize_title(str(item.get("title") or "")),
+                "abstract": normalize_title(str(item.get("abstractText") or "")),
+                "url": f"https://doi.org/{doi}" if doi else (
+                    f"https://europepmc.org/article/PMC/{pmcid}" if pmcid else
+                    (f"https://europepmc.org/article/MED/{ext_id}" if ext_id else "")
+                ),
+                "doi": doi,
+                "published": str(item.get("firstPublicationDate") or item.get("pubYear") or "").strip(),
+                "authors": [name for name in authors if name][:10],
+                "venue": str(item.get("journalTitle") or "").strip(),
+                "keywords": item.get("keywordList", {}).get("keyword", []) if isinstance(item.get("keywordList"), dict) else [],
+                "source": "europe_pmc_api",
+            })
+    return out
+
+
+def core_search(
+    queries: list[str], max_each: int = 5, api_key_env: str = "CORE_API_KEY",
+) -> list[dict[str, Any]]:
+    """Search CORE's official open-access corpus; a key improves availability."""
+    out: list[dict[str, Any]] = []
+    headers = {"User-Agent": "hermes-weekly-briefing/4.8"}
+    api_key = str(os.environ.get(api_key_env) or "").strip()
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
+    for query in queries:
+        params = urllib.parse.urlencode({"q": query, "limit": max_each})
+        req = urllib.request.Request(
+            "https://api.core.ac.uk/v3/search/works?" + params, headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=25, context=trusted_ssl_context()) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+        except Exception:
+            continue
+        records = payload.get("results") if isinstance(payload, dict) else []
+        for item in records if isinstance(records, list) else []:
+            if not isinstance(item, dict):
+                continue
+            authors = []
+            for author in item.get("authors") or []:
+                name = str(author.get("name") or "").strip() if isinstance(author, dict) else str(author).strip()
+                if name:
+                    authors.append(name)
+            doi = str(item.get("doi") or "").removeprefix("https://doi.org/").strip()
+            links = item.get("sourceFulltextUrls") if isinstance(item.get("sourceFulltextUrls"), list) else []
+            out.append({
+                "title": normalize_title(str(item.get("title") or "")),
+                "abstract": normalize_title(str(item.get("abstract") or "")),
+                "url": f"https://doi.org/{doi}" if doi else str(item.get("downloadUrl") or (links[0] if links else "")).strip(),
+                "doi": doi,
+                "published": str(item.get("publishedDate") or item.get("yearPublished") or "").strip(),
+                "authors": authors[:10],
+                "venue": str(item.get("publisher") or "").strip(),
+                "source": "core_api",
+            })
+    return out
+
+
+def hal_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
+    """Search the official HAL Solr API across its multidisciplinary archive."""
+    out: list[dict[str, Any]] = []
+    fields = "title_s,abstract_s,doiId_s,uri_s,authFullName_s,producedDate_tdate,journalTitle_s,keyword_s"
+    for query in queries:
+        params = urllib.parse.urlencode({
+            "q": query, "wt": "json", "rows": max_each, "fl": fields,
+            "sort": "producedDate_tdate desc",
+        })
+        code, _ctype, text = fetch_url("https://api.hal.science/search/?" + params, timeout=25)
+        if code != 200:
+            continue
+        try:
+            docs = json.loads(text).get("response", {}).get("docs", [])
+        except Exception:
+            continue
+        for item in docs if isinstance(docs, list) else []:
+            if not isinstance(item, dict):
+                continue
+            title_value = item.get("title_s") or ""
+            abstract_value = item.get("abstract_s") or ""
+            title = title_value[0] if isinstance(title_value, list) and title_value else title_value
+            abstract = abstract_value[0] if isinstance(abstract_value, list) and abstract_value else abstract_value
+            doi = str(item.get("doiId_s") or "").strip()
+            out.append({
+                "title": normalize_title(str(title or "")),
+                "abstract": normalize_title(str(abstract or "")),
+                "url": f"https://doi.org/{doi}" if doi else str(item.get("uri_s") or "").strip(),
+                "doi": doi,
+                "published": str(item.get("producedDate_tdate") or "").strip(),
+                "authors": [str(name).strip() for name in item.get("authFullName_s") or [] if str(name).strip()][:10],
+                "venue": str(item.get("journalTitle_s") or "").strip(),
+                "keywords": item.get("keyword_s") or [],
+                "source": "hal_api",
+            })
+    return out
+
+
+def zenodo_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
+    """Search Zenodo's official records API for papers and preprints."""
+    out: list[dict[str, Any]] = []
+    for query in queries[:4]:  # documented search endpoint limit is 30/minute
+        params = urllib.parse.urlencode({
+            "q": query, "size": max_each, "sort": "mostrecent",
+            "type": "publication",
+        })
+        code, _ctype, text = fetch_url("https://zenodo.org/api/records?" + params, timeout=25)
+        if code != 200:
+            continue
+        try:
+            hits = json.loads(text).get("hits", {}).get("hits", [])
+        except Exception:
+            continue
+        for item in hits if isinstance(hits, list) else []:
+            if not isinstance(item, dict):
+                continue
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            creators = metadata.get("creators") if isinstance(metadata.get("creators"), list) else []
+            doi = str(metadata.get("doi") or item.get("doi") or "").strip()
+            out.append({
+                "title": normalize_title(str(metadata.get("title") or "")),
+                "abstract": normalize_title(re.sub(r"<[^>]+>", " ", str(metadata.get("description") or ""))),
+                "url": f"https://doi.org/{doi}" if doi else str((item.get("links") or {}).get("html") or "").strip(),
+                "doi": doi,
+                "published": str(metadata.get("publication_date") or item.get("created") or "").strip(),
+                "authors": [str(author.get("name") or "").strip() for author in creators if isinstance(author, dict) and author.get("name")][:10],
+                "keywords": metadata.get("keywords") or [],
+                "source": "zenodo_api",
+            })
+    return out
+
+
+def datacite_search(queries: list[str], max_each: int = 5) -> list[dict[str, Any]]:
+    """Search DataCite's public REST API for article/preprint DOI records."""
+    out: list[dict[str, Any]] = []
+    for query in queries:
+        params = urllib.parse.urlencode({
+            "query": query, "page[size]": max_each,
+            "resource-type-id": "text", "sort": "published:desc",
+        })
+        code, _ctype, text = fetch_url("https://api.datacite.org/dois?" + params, timeout=25)
+        if code != 200:
+            continue
+        try:
+            records = json.loads(text).get("data", [])
+        except Exception:
+            continue
+        for record in records if isinstance(records, list) else []:
+            attrs = record.get("attributes") if isinstance(record, dict) and isinstance(record.get("attributes"), dict) else {}
+            types = attrs.get("types") if isinstance(attrs.get("types"), dict) else {}
+            scholarly_type = str(types.get("bibtex") or types.get("citeproc") or "").strip().casefold()
+            if scholarly_type and scholarly_type not in {
+                "article", "inproceedings", "proceedings-article", "phdthesis",
+                "mastersthesis", "dissertation", "posted-content",
+            }:
+                continue
+            titles = attrs.get("titles") if isinstance(attrs.get("titles"), list) else []
+            descriptions = attrs.get("descriptions") if isinstance(attrs.get("descriptions"), list) else []
+            creators = attrs.get("creators") if isinstance(attrs.get("creators"), list) else []
+            doi = str(attrs.get("doi") or record.get("id") or "").strip()
+            out.append({
+                "title": normalize_title(str((titles[0] if titles else {}).get("title") or "")),
+                "abstract": normalize_title(str((descriptions[0] if descriptions else {}).get("description") or "")),
+                "url": str(attrs.get("url") or (f"https://doi.org/{doi}" if doi else "")).strip(),
+                "doi": doi,
+                "published": str(attrs.get("published") or attrs.get("publicationYear") or "").strip(),
+                "authors": [str(author.get("name") or "").strip() for author in creators if isinstance(author, dict) and author.get("name")][:10],
+                "venue": str(attrs.get("publisher") or "").strip(),
+                "work_type": scholarly_type,
+                "keywords": [str(subject.get("subject") or "").strip() for subject in attrs.get("subjects") or [] if isinstance(subject, dict)],
+                "source": "datacite_api",
+            })
+    return out
+
+
 def scopus_search(
     queries: list[str], max_each: int = 5,
     api_key_env: str = "SCOPUS_API_KEY", insttoken_env: str = "SCOPUS_INSTTOKEN",
@@ -701,6 +1052,23 @@ def build_queries(config: dict[str, Any], _profile: dict[str, Any], feedback: di
             "increase", "force_explore", "boost",
         }:
             base.append(str(item.get("topic") or item.get("keyword") or ""))
+    # Push the same required concepts used by post-filtering down into discovery.
+    # Each group represents synonyms (OR); choosing one value from every group
+    # creates an AND-style query. Bound the cartesian product so broad synonym
+    # sets cannot multiply provider traffic without limit.
+    policy = relevance_policy(config)
+    groups = [list(group)[:3] for group in policy.get("all_groups") or [] if group]
+    policy_queries: list[str] = []
+    if groups:
+        combinations = itertools.islice(itertools.product(*groups), 8)
+        any_terms = list(policy.get("any_terms") or [])
+        for combo in combinations:
+            joined = " ".join(combo)
+            policy_queries.append(joined)
+            policy_queries.extend(f"{joined} {term}" for term in any_terms[:2])
+    # Required-concept queries take precedence over broad keywords when the
+    # provider query budget is capped.
+    base = [*policy_queries, *base]
     cleaned = []
     for q in base:
         q = normalize_title(str(q))
@@ -737,6 +1105,16 @@ def source_label(paper: dict[str, Any]) -> str:
         return "Google Scholar"
     if "crossref" in folded:
         return "Crossref"
+    if "europe_pmc" in folded:
+        return "Europe PMC"
+    if "core_api" in folded:
+        return "CORE"
+    if "hal_api" in folded:
+        return "HAL"
+    if "zenodo" in folded:
+        return "Zenodo"
+    if "datacite" in folded:
+        return "DataCite"
     if paper.get("doi"):
         return "DOI"
     if raw.startswith("http://") or raw.startswith("https://"):
@@ -1558,8 +1936,9 @@ def main() -> int:
         dedup = read_json(PAPERS_DIR / "dedup.json", {})
         archive = read_json(PAPERS_DIR / "archive.json", {})
 
+        policy = relevance_policy(config)
         queries = build_queries(config, {}, feedback)
-        log_event(run_log, type="queries", queries=queries)
+        log_event(run_log, type="queries", queries=queries, relevance_policy=policy)
 
         candidates = []
         existing = load_existing_candidates(week)
@@ -1567,7 +1946,7 @@ def main() -> int:
         log_event(run_log, type="existing_candidates", count=len(existing))
 
         search_cfg = config.get("search") if isinstance(config.get("search"), dict) else {}
-        source_names = search_cfg.get("sources") if isinstance(search_cfg.get("sources"), list) else ["openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview"]
+        source_names = search_cfg.get("sources") if isinstance(search_cfg.get("sources"), list) else DEFAULT_SEARCH_SOURCES
         sources = {str(value).strip().casefold().replace("-", "_") for value in source_names if str(value).strip()}
         query_window = queries[:6]
         discovery_tasks: list[tuple[str, Any, tuple[Any, ...], dict[str, Any]]] = []
@@ -1583,6 +1962,16 @@ def main() -> int:
             discovery_tasks.append(("dblp_api_candidates", dblp_search, (query_window,), {"max_each": 6}))
         if "openreview" in sources:
             discovery_tasks.append(("openreview_api_candidates", openreview_search, (query_window,), {"max_each": 6}))
+        if "europe_pmc" in sources:
+            discovery_tasks.append(("europe_pmc_api_candidates", europe_pmc_search, (query_window,), {"max_each": 6}))
+        if "core" in sources:
+            discovery_tasks.append(("core_api_candidates", core_search, (query_window,), {"max_each": 6, "api_key_env": str(search_cfg.get("core_api_key_env") or "CORE_API_KEY")}))
+        if "hal" in sources:
+            discovery_tasks.append(("hal_api_candidates", hal_search, (query_window,), {"max_each": 6}))
+        if "zenodo" in sources:
+            discovery_tasks.append(("zenodo_api_candidates", zenodo_search, (query_window,), {"max_each": 6}))
+        if "datacite" in sources:
+            discovery_tasks.append(("datacite_api_candidates", datacite_search, (query_window,), {"max_each": 6}))
         if "scopus" in sources:
             discovery_tasks.append(("scopus_api_candidates", scopus_search, (query_window,), {"max_each": 6, "api_key_env": str(search_cfg.get("scopus_api_key_env") or "SCOPUS_API_KEY"), "insttoken_env": str(search_cfg.get("scopus_insttoken_env") or "SCOPUS_INSTTOKEN")}))
         if "google_scholar" in sources:
@@ -1591,7 +1980,7 @@ def main() -> int:
         # Sources are independent failure domains.  Run one bounded worker per
         # configured source while keeping each adapter's own query loop serial,
         # which avoids both N×timeout latency and bursty per-provider traffic.
-        with ThreadPoolExecutor(max_workers=max(1, min(6, len(discovery_tasks)))) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, min(8, len(discovery_tasks)))) as pool:
             pending = {
                 pool.submit(function, *arguments, **keywords): event_type
                 for event_type, function, arguments, keywords in discovery_tasks
@@ -1639,19 +2028,26 @@ def main() -> int:
             ]
             cross_dedup_removed += before_title_dedup - len(candidates)
 
-        terms = direction_terms(config)
         filtered = []
         rejected = []
         off_direction: list[dict[str, Any]] = []
         future_dated: list[dict[str, Any]] = []
         for c in candidates:
+            integrity_ok, integrity_reason = metadata_integrity_verdict(c)
+            if not integrity_ok:
+                c["filter_score"] = -100
+                c["filter_reasons"] = [integrity_reason]
+                c["direction_verdict"] = integrity_reason
+                rejected.append(c)
+                off_direction.append(c)
+                continue
             ok, score, reasons = is_paper_like(c)
             c["filter_score"] = score
             c["filter_reasons"] = reasons
             if not ok:
                 rejected.append(c)
                 continue
-            admitted, verdict = direction_verdict(c, terms)
+            admitted, verdict = direction_verdict(c, policy)
             c["direction_verdict"] = verdict
             if not admitted:
                 rejected.append(c)
@@ -1686,6 +2082,7 @@ def main() -> int:
             "selected_count": len(selected),
             "rejected_count": len(rejected),
             "off_direction_rejected": len(off_direction),
+            "relevance_policy": "legacy_or" if policy.get("legacy") else "boolean",
             "future_dated_rejected": len(future_dated),
             "queries": len(queries),
             "selected_discovery_sources": sorted({source for paper in selected for source in (paper.get("discovery_sources") or [paper.get("source")]) if source}),

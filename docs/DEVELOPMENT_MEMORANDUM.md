@@ -73,3 +73,51 @@ Every public release must prove that:
 - PDF readiness proves that a renderer is imported from the plugin-owned
   persistent runtime; a matching package found only in Hermes core is not
   reported as an isolated installation.
+
+## Search breadth is capability-based, not a source-name checklist
+
+Use official machine APIs and state each source's role. OpenAlex/Crossref cover
+general scholarly metadata; arXiv, DBLP and OpenReview cover important
+computer-science and preprint/conference lanes; Europe PMC covers life sciences;
+CORE and HAL add open-repository/full-text discovery; Zenodo and DataCite add
+research outputs and DOI records. Scopus and Google Scholar/SerpApi stay opt-in
+because they require external credentials or a paid intermediary. Adding a
+source requires a parser fixture, connectivity probe, dedup compatibility,
+rate bound, and clear credential ownership. Never scrape a website merely to
+inflate the source count.
+
+## Relevance is a deterministic admission policy
+
+The old `direction_terms` gate was OR-only and title-only. A broad word could
+therefore admit an adjacent field and leave the model to choose the least-wrong
+papers. The production policy now supports:
+
+- AND across required concept groups;
+- OR among synonyms inside each group;
+- a minimum number of optional terms;
+- hard exclusions; and
+- explicit match fields (title, abstract, keywords, venue).
+
+Required groups are also combined into bounded provider queries, but provider
+query syntax is never trusted as the final gate. Every returned candidate is
+rechecked locally with the same normalized Boolean policy before ranking or
+model analysis. Public defaults contain no research terms; existing legacy
+profiles retain their former one-of direction behavior until the user chooses
+the richer policy.
+
+Strict required concepts must also co-occur in the title or one abstract
+sentence/paragraph. Document-wide co-occurrence is insufficient because two
+unrelated method stages can mention the required concepts independently.
+
+## External scholarly metadata is an untrusted input boundary
+
+Open repositories can contain arbitrary deposits rather than peer-reviewed
+papers, including code dumps, duplicated text and instructions aimed at
+crawlers or language models. Before any model call, reject source-neutral
+integrity failures: oversized abstracts, high code density, repeated payloads,
+and text that combines agent/crawler addressing with control instructions.
+Source adapters should additionally retain and validate scholarly work types
+where the API provides them. The analysis system prompt must state that titles,
+abstracts and metadata are untrusted data and that embedded instructions have
+no authority. A newly added source is not production-ready until a real
+cross-source discovery run proves that this boundary holds.

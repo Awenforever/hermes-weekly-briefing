@@ -46,7 +46,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 首次设置会围绕你的真实需求确认：
 
 - 核心研究方向与关键词；
-- 可选的严格方向词（用于排除只碰巧包含相似术语的跨领域结果）；
+- 可选的严格相关性策略：每篇必须同时满足的概念、每个概念的同义词、至少命中项与排除项；
 - 每期论文数量（默认 5 篇）；
 - 收件邮箱；
 - 每周发送时间与时区；
@@ -75,7 +75,11 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 
 Weekly Briefing 默认同时使用 `OpenAlex`、`Semantic Scholar`、`Crossref`、`arXiv`、`DBLP` 与 `OpenReview`。同一论文从多个索引返回时会合并为一条，保留完整来源轨迹并择优补全摘要、作者、DOI 和发布日期；最终筛选只在质量接近时偏向来源多样性，不用生硬配额把低质量论文塞进周报。
 
-还可按需启用 `Scopus` 和 `Google Scholar`：Scopus 使用 Elsevier API Key（机构环境可另配 Insttoken）；Google Scholar 没有公开官方检索 API，因此插件只支持用户主动配置的 SerpApi，不直接抓取 Scholar 网页。没有这些凭据不会影响默认六个来源工作。
+还可以按研究领域扩展官方机器接口：`Europe PMC`（生命科学论文与预印本）、`CORE`（开放获取全文与仓储）、`HAL`（多学科开放仓储）、`Zenodo`（论文、预印本与研究产物）和 `DataCite`（更广的 DOI 研究记录）。这些来源与默认来源互补，不要求新用户盲目全开；安装引导会根据研究领域说明覆盖差异，再实测所选接口。
+
+还可按需启用 `Scopus` 和 `Google Scholar`：Scopus 使用 Elsevier API Key（机构环境可另配 Insttoken）；Google Scholar 没有公开官方检索 API，因此插件只支持用户主动配置的 SerpApi，不直接抓取 Scholar 网页。没有这些凭据不会影响开放来源工作。
+
+OpenAlex 的少量匿名请求可用于试用；生产周报建议注册免费 key。注册地址是 [OpenAlex API Settings](https://openalex.org/settings/api)，插件只记录环境变量名，例如 `OPENALEX_API_KEY`，不会复制 key。
 
 ```bash
 # 查看配置来源及实时连通性
@@ -88,17 +92,39 @@ hermes weekly-briefing setup \
   --search-source crossref \
   --search-source arxiv \
   --search-source dblp \
-  --search-source openreview
+  --search-source openreview \
+  --search-source europe_pmc \
+  --search-source core \
+  --search-source hal \
+  --search-source zenodo \
+  --search-source datacite
 
-# 可选：为容易歧义的方向设置严格标题边界；可重复传入
+# 严格相关性：每个 --require-all 是一个必需概念；竖线内是同义词
+# 下例表示：(概念A 或其同义词) AND (概念B 或其同义词)
+# 同时还须在 optional-X/Y/Z 中至少命中 1 个，并排除 unwanted-topic
+# 严格模式还要求必需概念出现在标题或同一句摘要中，避免“各自出现但互不相关”
 hermes weekly-briefing setup \
-  --direction-term "YOUR STRICT TITLE PHRASE" \
-  --direction-term "YOUR SECOND STRICT PHRASE"
+  --require-all "CONCEPT-A|SYNONYM-A" \
+  --require-all "CONCEPT-B|SYNONYM-B" \
+  --require-any "OPTIONAL-X|OPTIONAL-Y|OPTIONAL-Z" \
+  --minimum-any 1 \
+  --exclude-term "UNWANTED-TOPIC" \
+  --match-field title \
+  --match-field abstract \
+  --match-field keywords
 
 # 可选：使用由 Hermes/系统环境管理的 Semantic Scholar 密钥
 hermes weekly-briefing setup \
   --search-source semantic_scholar \
   --semantic-scholar-api-key-env SEMANTIC_SCHOLAR_API_KEY
+
+hermes weekly-briefing setup \
+  --search-source openalex \
+  --openalex-api-key-env OPENALEX_API_KEY
+
+hermes weekly-briefing setup \
+  --search-source core \
+  --core-api-key-env CORE_API_KEY
 
 # 可选：把凭据留在 Hermes/系统环境，插件只保存变量名
 hermes weekly-briefing setup \
@@ -112,6 +138,8 @@ hermes weekly-briefing setup \
 ```
 
 插件只保存“使用哪个环境变量”的选择，不接管、复制或输出密钥。安装过程会真实请求每个已选来源；如果全部不可达，引导会停在搜索配置步骤，并说明需要配置来源、凭据、网络出口或代理。
+
+所有外部索引元数据都按“不可信数据”处理：超长、重复、代码化或试图向 AI/爬虫下指令的仓储内容会在模型分析前被统一拦截；其余摘要进入分析模型时也明确作为数据隔离，不能改变分析规则。
 
 ## 反馈与偏好
 
