@@ -272,6 +272,29 @@ class ReportRendererTests(unittest.TestCase):
         self.assertEqual(["A", "C", "B"], [paper["title"] for paper in selected])
         self.assertNotIn("D", [paper["title"] for paper in selected])
 
+    def test_missing_abstract_is_quarantined_and_reserve_remains_publishable(self):
+        candidates = [
+            {"title": "Missing evidence", "doi": "10.1/missing", "url": "https://doi.org/10.1/missing", "abstract": "", "filter_score": 10},
+            {"title": "Complete reserve", "doi": "10.1/complete", "url": "https://doi.org/10.1/complete", "abstract": "Grounded evidence. " * 12, "filter_score": 9},
+        ]
+        eligible, quarantined, stats = runner.prepare_evidence_pool(
+            candidates, 1, recover=False
+        )
+        self.assertEqual(["Complete reserve"], [paper["title"] for paper in eligible])
+        self.assertEqual(["insufficient_abstract_evidence"], quarantined[0]["reasons"])
+        self.assertEqual(1, stats["evidence_quarantined"])
+
+    def test_attempt_publish_uses_manifest_as_commit_marker(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            attempt, published = root / "attempt", root / "published"
+            attempt.mkdir()
+            (attempt / "report.md").write_text("new report", encoding="utf-8")
+            (attempt / "manifest.json").write_text('{"status":"success"}', encoding="utf-8")
+            runner.publish_attempt(attempt, published, ["manifest.json", "report.md"])
+            self.assertEqual("new report", (published / "report.md").read_text(encoding="utf-8"))
+            self.assertEqual('{"status":"success"}', (published / "manifest.json").read_text(encoding="utf-8"))
+
     def test_quality_gate_rejects_missing_author_identity(self):
         with tempfile.TemporaryDirectory() as raw:
             paper = self.sample_papers()[0]

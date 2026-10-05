@@ -122,6 +122,31 @@ class AnalysisEngineTests(unittest.TestCase):
         self.assertEqual(2, provenance["analysis_attempts"])
         self.assertFalse(provenance["fallback_used"])
 
+    def test_resilient_analysis_quarantines_only_the_bad_paper(self):
+        papers = [
+            {"canonical_id": "good", "title": "Good", "abstract": "Evidence"},
+            {"canonical_id": "bad", "title": "Bad", "abstract": "Evidence"},
+        ]
+        def analyze(items, _config, _home):
+            if len(items) > 1:
+                raise RuntimeError("batch omitted one id")
+            paper_id = items[0]["canonical_id"]
+            if paper_id == "bad":
+                raise RuntimeError("bad record")
+            return {"papers": {paper_id: _record()}}, {
+                "provider": "hermes", "requested_model": "inherit",
+                "actual_model": "main", "fallback_model": "inherit",
+                "fallback_used": False, "analysis_attempts": 1,
+                "paper_count": 1,
+            }
+        with mock.patch.object(engine, "analyze_papers", side_effect=analyze):
+            result, provenance, failures = engine.analyze_papers_resilient(
+                papers, {}, Path(".")
+            )
+        self.assertEqual({"good"}, set(result["papers"]))
+        self.assertEqual(["bad"], failures)
+        self.assertTrue(provenance["isolation_used"])
+
 
 if __name__ == "__main__":
     unittest.main()

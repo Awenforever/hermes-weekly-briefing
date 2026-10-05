@@ -34,7 +34,7 @@ RUNTIME_PATH = Path(RUNTIME_PATH_RAW).expanduser() if RUNTIME_PATH_RAW else None
 if RUNTIME_PATH is not None and RUNTIME_PATH.is_dir() and str(RUNTIME_PATH) not in sys.path:
     sys.path.insert(0, str(RUNTIME_PATH))
 
-from weekly_analysis_engine import analyze_papers, incomplete_analysis_ids
+from weekly_analysis_engine import analyze_papers_resilient, incomplete_analysis_ids
 
 MARKER = "HERMES_WEEKLY_E2E_RUNNER_V1"
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
@@ -1148,6 +1148,111 @@ def select_source_diverse(candidates: list[dict[str, Any]], limit: int) -> list[
     return selected
 
 
+def _strip_markup(value: Any) -> str:
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _paper_doi(paper: dict[str, Any]) -> str:
+    doi = str(paper.get("doi") or "").strip()
+    if not doi:
+        doi = extract_doi(
+            " ".join(str(paper.get(key) or "") for key in ("title", "url", "desc"))
+        ) or ""
+    return re.sub(r"^https?://doi\.org/", "", doi, flags=re.I).strip()
+
+
+def recover_abstract(paper: dict[str, Any], timeout: int = 20) -> str:
+    """Recover evidence text through identifiers, without inventing content."""
+    doi = _paper_doi(paper)
+    if doi:
+        encoded = urllib.parse.quote(doi)
+        lookups = (
+            (
+                f"https://api.openalex.org/works/doi:{encoded}",
+                lambda payload: _openalex_abstract(payload.get("abstract_inverted_index")),
+            ),
+            (
+                f"https://api.crossref.org/works/{encoded}",
+                lambda payload: _strip_markup((payload.get("message") or {}).get("abstract")),
+            ),
+        )
+        for url, extract in lookups:
+            try:
+                code, _ctype, text = fetch_url(url, timeout=timeout)
+                if code != 200:
+                    continue
+                recovered = normalize_title(str(extract(json.loads(text)) or ""))
+            except Exception:
+                continue
+            if len(recovered) >= 80:
+                return recovered
+    arxiv_id = str(paper.get("arxiv_id") or "").strip()
+    if arxiv_id:
+        try:
+            recovered = arxiv_search([f"id:{arxiv_id}"], max_each=1)
+            if recovered and len(str(recovered[0].get("abstract") or "")) >= 80:
+                return str(recovered[0]["abstract"])
+        except Exception:
+            pass
+    return ""
+
+
+def prepare_evidence_pool(
+    candidates: list[dict[str, Any]], limit: int, *, recover: bool = True
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    """Separate publishable evidence from quarantined metadata records.
+
+    Missing evidence is a candidate-level condition, not a report-level fatal
+    exception.  Only a bounded selection frontier performs network recovery;
+    every other candidate remains eligible as a reserve when it already has
+    sufficient evidence.
+    """
+    frontier = max(12, max(1, int(limit)) * 4)
+    stats = {"abstracts_backfilled": 0, "evidence_quarantined": 0}
+    eligible: list[dict[str, Any]] = []
+    quarantined: list[dict[str, Any]] = []
+    for index, paper in enumerate(candidates):
+        abstract = re.sub(r"\s+", " ", str(paper.get("abstract") or "")).strip()
+        if len(abstract) < 80 and recover and index < frontier:
+            abstract = recover_abstract(paper)
+            if abstract:
+                paper["abstract"] = abstract
+                stats["abstracts_backfilled"] += 1
+        reasons = []
+        if not str(paper.get("title") or "").strip():
+            reasons.append("missing_title")
+        if len(abstract) < 80:
+            reasons.append("insufficient_abstract_evidence")
+        if not source_url(paper):
+            reasons.append("missing_original_link")
+        if reasons:
+            quarantined.append({
+                "id": canonical_id(paper),
+                "title": str(paper.get("title") or "")[:240],
+                "reasons": reasons,
+            })
+            continue
+        eligible.append(paper)
+    stats["evidence_quarantined"] = len(quarantined)
+    return eligible, quarantined, stats
+
+
+def paper_publishability_issues(paper: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    if not source_url(paper):
+        issues.append("missing_original_link")
+    if len(str(paper.get("abstract") or "").strip()) < 80:
+        issues.append("insufficient_abstract_evidence")
+    analysis = _paper_analysis(paper)
+    if not all(analysis.get(key) for key in ("problem", "why_it_matters", "method_steps", "evidence", "limitations")):
+        issues.append("incomplete_deep_analysis")
+    team = paper.get("team_profile") if isinstance(paper.get("team_profile"), dict) else {}
+    if not list(team.get("authors") or []) and not list(paper.get("authors") or []):
+        issues.append("missing_author_identity")
+    return issues
+
+
 def sentence_excerpt(value: Any, limit: int = 900) -> str:
     """Shorten prose without exposing a broken word or half sentence."""
     text = re.sub(r"\s+", " ", str(value or "")).strip()
@@ -1885,6 +1990,19 @@ def log_event(log_path: Path, **kw: Any) -> None:
     except Exception:
         pass
 
+
+def publish_attempt(attempt_dir: Path, published_dir: Path, names: list[str]) -> None:
+    """Publish a complete attempt with the manifest as the commit marker."""
+    published_dir.mkdir(parents=True, exist_ok=True)
+    ordered = [name for name in names if name != "manifest.json"] + ["manifest.json"]
+    for name in ordered:
+        source = attempt_dir / name
+        if not source.is_file():
+            continue
+        temporary = published_dir / f".{name}.publishing"
+        shutil.copy2(source, temporary)
+        os.replace(temporary, published_dir / name)
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--week", default=iso_week_today())
@@ -1908,7 +2026,8 @@ def main() -> int:
 
     week = args.week
     run_id = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    outdir = REPORTS_DIR / week
+    published_outdir = REPORTS_DIR / week
+    outdir = REPORTS_DIR / ".attempts" / f"{week}-{run_id}"
     outdir.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     run_log = LOGS_DIR / f"run-{week}-{run_id}.jsonl"
@@ -2072,34 +2191,33 @@ def main() -> int:
             ),
             reverse=True,
         )
-        selected = select_source_diverse(filtered, args.max_selected)
+        evidence_pool, quarantined, evidence_stats = prepare_evidence_pool(
+            filtered, args.max_selected
+        )
+        selected: list[dict[str, Any]] = []
 
         stats = {
+            **evidence_stats,
             "raw_candidates": raw_count,
             "candidate_deduped": url_dedup_count,
             "cross_week_deduped": cross_dedup_removed,
             "hard_filter_passed": len(filtered),
-            "selected_count": len(selected),
+            "selected_count": 0,
             "rejected_count": len(rejected),
             "off_direction_rejected": len(off_direction),
             "relevance_policy": "legacy_or" if policy.get("legacy") else "boolean",
             "future_dated_rejected": len(future_dated),
             "queries": len(queries),
-            "selected_discovery_sources": sorted({source for paper in selected for source in (paper.get("discovery_sources") or [paper.get("source")]) if source}),
+            "selected_discovery_sources": [],
         }
 
-        # Update dedup.json with newly selected papers for cross-week dedup
-        now_ts = now_iso()
-        for s in selected:
-            dedup.setdefault("papers", {})[canonical_id(s)] = {
-                "first_seen_week": week,
-                "first_seen_at": now_ts,
-                "title": s.get("title", "")[:200],
-            }
-        dedup["updated_at"] = now_ts
-        write_json(PAPERS_DIR / "dedup.json", dedup)
-
         if args.discovery_only:
+            selected = select_source_diverse(evidence_pool, args.max_selected)
+            stats["selected_count"] = len(selected)
+            stats["selected_discovery_sources"] = sorted({
+                source for paper in selected
+                for source in (paper.get("discovery_sources") or [paper.get("source")]) if source
+            })
             discovery_out = {
                 "version": 2,
                 "runner": MARKER,
@@ -2119,36 +2237,81 @@ def main() -> int:
             return 0
 
         analysis_path = Path(args.analysis_file) if args.analysis_file else outdir / "analysis.json"
-        analysis_payload = read_json(analysis_path, {})
+        cached_analysis_path = analysis_path if args.analysis_file else published_outdir / "analysis.json"
+        analysis_payload = read_json(cached_analysis_path, {})
+        if not isinstance(analysis_payload.get("papers"), dict):
+            analysis_payload["papers"] = {}
         analysis_cfg = config.get("analysis") if isinstance(config.get("analysis"), dict) else {}
-        analysis_input = [{**paper, "canonical_id": canonical_id(paper)} for paper in selected]
-        cached_analysis_incomplete = incomplete_analysis_ids(analysis_payload, [
-            {
-                "id": paper["canonical_id"],
-                "title": paper.get("title"),
-                "abstract": paper.get("abstract"),
-            }
-            for paper in analysis_input
-        ]) if selected else []
-        if (
-            selected
-            and cached_analysis_incomplete
-            and not args.allow_shallow
-            and analysis_cfg.get("auto", True) is not False
-        ):
-            analysis_payload, provenance = analyze_papers(analysis_input, config, HERMES_HOME)
-            analysis_payload["provenance"] = provenance
-            write_json(analysis_path, analysis_payload)
-            log_event(run_log, type="deep_analysis", repaired_cached_ids=cached_analysis_incomplete, **provenance)
-        missing_analysis = attach_deep_analysis(selected, analysis_payload)
-        if missing_analysis and not args.allow_shallow:
-            raise RuntimeError(
-                "deep analysis is required before production rendering; missing: "
-                + ", ".join(missing_analysis)
-            )
-        stats["deep_analysis_count"] = len(selected) - len(missing_analysis)
+        attempted: set[str] = set()
+        analysis_failures: list[str] = []
+        analysis_runs: list[dict[str, Any]] = []
+        while len(selected) < max(1, args.max_selected):
+            available = [paper for paper in evidence_pool if canonical_id(paper) not in attempted]
+            proposal = select_source_diverse(available, max(1, args.max_selected - len(selected)))
+            if not proposal:
+                break
+            for paper in proposal:
+                attempted.add(canonical_id(paper))
+            proposal_input = [{**paper, "canonical_id": canonical_id(paper)} for paper in proposal]
+            pending_ids = incomplete_analysis_ids(analysis_payload, [
+                {"id": paper["canonical_id"]} for paper in proposal_input
+            ]) if proposal_input else []
+            if (
+                pending_ids
+                and not args.allow_shallow
+                and analysis_cfg.get("auto", True) is not False
+            ):
+                pending_set = set(pending_ids)
+                fresh_payload, provenance, isolated_failures = analyze_papers_resilient(
+                    [paper for paper in proposal_input if paper["canonical_id"] in pending_set],
+                    config,
+                    HERMES_HOME,
+                )
+                analysis_payload["papers"].update(fresh_payload.get("papers") or {})
+                if isinstance(fresh_payload.get("narrative"), dict):
+                    analysis_payload["narrative"] = fresh_payload["narrative"]
+                analysis_runs.append(provenance)
+                analysis_failures.extend(isolated_failures)
+                analysis_payload["provenance"] = provenance
+                write_json(analysis_path, analysis_payload)
+                log_event(run_log, type="deep_analysis", requested_ids=pending_ids, **provenance)
+            missing = set(attach_deep_analysis(proposal, analysis_payload))
+            enrich_author_teams(proposal)
+            for paper in proposal:
+                issues = [] if args.allow_shallow else paper_publishability_issues(paper)
+                if canonical_id(paper) in missing and not args.allow_shallow:
+                    if "incomplete_deep_analysis" not in issues:
+                        issues.append("incomplete_deep_analysis")
+                if issues:
+                    quarantined.append({
+                        "id": canonical_id(paper),
+                        "title": str(paper.get("title") or "")[:240],
+                        "reasons": issues,
+                    })
+                    continue
+                selected.append(paper)
+                if len(selected) >= max(1, args.max_selected):
+                    break
+        stats["selected_count"] = len(selected)
+        stats["deep_analysis_count"] = sum(
+            1 for paper in selected if not paper_publishability_issues(paper)
+        )
+        stats["paper_failures_isolated"] = len(quarantined)
+        stats["analysis_failures_isolated"] = len(set(analysis_failures))
+        stats["selected_discovery_sources"] = sorted({
+            source for paper in selected
+            for source in (paper.get("discovery_sources") or [paper.get("source")]) if source
+        })
+        write_json(outdir / "quarantine_receipt.json", {
+            "version": 1,
+            "week": week,
+            "generated_at": now_iso(),
+            "target_count": max(1, args.max_selected),
+            "selected_count": len(selected),
+            "items": quarantined,
+            "analysis_runs": analysis_runs,
+        })
         narrative = analysis_payload.get("narrative") if isinstance(analysis_payload, dict) and isinstance(analysis_payload.get("narrative"), dict) else {}
-        enrich_author_teams(selected)
         write_json(outdir / "selected_snapshot.json", {
             "version": 1,
             "runner": MARKER,
@@ -2188,10 +2351,10 @@ def main() -> int:
             "generated_at": now_iso(),
             "local": {
                 "status": "written",
-                "report_dir": str(outdir),
-                "markdown": str(report_md_path),
-                "html": str(report_html_path),
-                "pdf": str(report_pdf_path),
+                "report_dir": str(published_outdir),
+                "markdown": str(published_outdir / "report.md"),
+                "html": str(published_outdir / "report.html"),
+                "pdf": str(published_outdir / "report.pdf"),
             },
             "email": email_receipt,
         }
@@ -2202,6 +2365,22 @@ def main() -> int:
                 "email delivery required but not completed: "
                 + str(email_receipt.get("status") or "unknown")
             )
+
+        # Selection history is a delivery commit, not a discovery side effect.
+        # Dry-runs and failed deliveries must remain repeatable and must not
+        # suppress papers that the reader never received.
+        history_committed = bool(args.send_email and email_receipt.get("status") == "sent")
+        if history_committed:
+            now_ts = now_iso()
+            for paper in selected:
+                dedup.setdefault("papers", {})[canonical_id(paper)] = {
+                    "first_seen_week": week,
+                    "first_seen_at": now_ts,
+                    "title": str(paper.get("title") or "")[:200],
+                }
+            dedup["updated_at"] = now_ts
+            write_json(PAPERS_DIR / "dedup.json", dedup)
+        stats["history_committed"] = history_committed
 
         manifest.update({
             "status": "success" if selected else "no_selection",
@@ -2221,6 +2400,7 @@ def main() -> int:
                 "html": "report.html",
                 "pdf": "report.pdf",
                 "selected_snapshot": "selected_snapshot.json",
+                "quarantine_receipt": "quarantine_receipt.json",
                 "quality_receipt": "quality_receipt.json",
                 "delivery_receipt": "delivery_receipt.json",
                 "run_log": str(run_log),
@@ -2230,8 +2410,17 @@ def main() -> int:
             },
         })
         write_json(outdir / "manifest.json", manifest)
+        publish_attempt(
+            outdir,
+            published_outdir,
+            [
+                "analysis.json", "selected_snapshot.json", "quarantine_receipt.json",
+                "report.md", "report.html", "report.pdf", "quality_receipt.json",
+                "delivery_receipt.json", "manifest.json",
+            ],
+        )
         log_event(run_log, type="done", manifest_status=manifest["status"], email_status=email_receipt.get("status"), selected=len(selected))
-        print(json.dumps({"ok": True, "manifest": str(outdir / "manifest.json"), "report": str(report_md_path), "pdf": str(report_pdf_path), "email_status": email_receipt.get("status")}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": True, "manifest": str(published_outdir / "manifest.json"), "report": str(published_outdir / "report.md"), "pdf": str(published_outdir / "report.pdf"), "email_status": email_receipt.get("status")}, ensure_ascii=False, indent=2))
         return 0
     except Exception as e:
         tb = traceback.format_exc()

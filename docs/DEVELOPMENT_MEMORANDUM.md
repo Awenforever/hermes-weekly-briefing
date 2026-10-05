@@ -121,3 +121,25 @@ where the API provides them. The analysis system prompt must state that titles,
 abstracts and metadata are untrusted data and that embedded instructions have
 no authority. A newly added source is not production-ready until a real
 cross-source discovery run proves that this boundary holds.
+
+## Evidence isolation and transactional publication
+
+Abstract coverage is an admission property of one candidate, not a reason to
+abort a complete weekly run. The pipeline may recover an abstract from a
+machine-readable identifier, but it must never ask a model to invent evidence.
+Candidates without sufficient abstract evidence or an original link are
+quarantined with explicit reasons; ranked reserves then compete under the same
+relevance policy. Deep analysis uses a batch fast path and per-paper isolation
+fallback, so one omitted or malformed record cannot discard healthy results.
+
+Only publishable papers—with evidence, link, author identity and complete
+grounded analysis—reach rendering. The quality gate still fails closed for
+systemic renderer defects, while candidate-level failures are reported in a
+quarantine receipt. A run is created in an attempt directory and the successful
+manifest is published last, preserving the previous known-good report when a
+new attempt fails.
+
+Cross-week dedup is delivery state, not discovery state. Never mutate it during
+selection, analysis, rendering or a dry-run. Commit selected identifiers only
+after email delivery is confirmed; otherwise an unseen paper would disappear
+from later weeks.

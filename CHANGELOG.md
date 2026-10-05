@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.9.0 - 2026-10-05
+
+- Treat missing abstracts and incomplete per-paper analysis as quarantined
+  candidate failures, with evidence-based reserve selection instead of aborting
+  the complete briefing.
+- Fall back from batch analysis to isolated per-paper analysis so one malformed
+  record cannot discard healthy papers.
+- Commit cross-week dedup history only after confirmed email delivery; dry-runs
+  and failed runs no longer consume unseen papers.
+- Render each run in an attempt directory and publish successful artifacts with
+  the manifest last, preserving the last known-good weekly report.
+- Add machine-readable quarantine and analysis-isolation receipts.
+
 ## 4.8.0 - 2026-10-04
 
 - adds deterministic Boolean relevance policies with AND-across-concept groups,

@@ -177,3 +177,58 @@ def analyze_papers(
         "paper_count": len(papers),
     }
     return result, provenance
+
+
+def analyze_papers_resilient(
+    papers: list[dict[str, Any]],
+    config: dict[str, Any],
+    hermes_home: Path,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Analyze a batch while isolating malformed or omitted individual items.
+
+    The fast path remains one model request.  If that batch cannot satisfy the
+    complete-output contract, papers are retried independently so one poisoned
+    record or one omitted key cannot discard otherwise publishable work.
+    """
+    if not papers:
+        return {"papers": {}}, {
+            "provider": "hermes", "requested_model": "inherit",
+            "actual_model": "", "fallback_model": "inherit",
+            "fallback_used": False, "analysis_attempts": 0,
+            "paper_count": 0, "isolation_used": False,
+        }, []
+    try:
+        payload, provenance = analyze_papers(papers, config, hermes_home)
+        return payload, {**provenance, "isolation_used": False}, []
+    except Exception as batch_error:
+        merged: dict[str, Any] = {"papers": {}}
+        failures: list[str] = []
+        routes: list[dict[str, Any]] = []
+        for paper in papers:
+            paper_id = str(paper.get("canonical_id") or "")
+            try:
+                partial, route = analyze_papers([paper], config, hermes_home)
+                record = (partial.get("papers") or {}).get(paper_id)
+                if not isinstance(record, dict) or incomplete_analysis_ids(
+                    {"papers": {paper_id: record}},
+                    [{"id": paper_id}],
+                ):
+                    raise RuntimeError("individual analysis remained incomplete")
+                merged["papers"][paper_id] = record
+                routes.append(route)
+            except Exception:
+                failures.append(paper_id)
+        route = routes[-1] if routes else {}
+        provenance = {
+            "provider": str(route.get("provider") or "hermes"),
+            "requested_model": str(route.get("requested_model") or "inherit"),
+            "actual_model": str(route.get("actual_model") or ""),
+            "fallback_model": str(route.get("fallback_model") or "inherit"),
+            "fallback_used": any(bool(item.get("fallback_used")) for item in routes),
+            "analysis_attempts": sum(int(item.get("analysis_attempts") or 0) for item in routes),
+            "paper_count": len(papers),
+            "isolation_used": True,
+            "batch_error": str(batch_error)[:500],
+            "isolated_failures": failures,
+        }
+        return merged, provenance, failures
