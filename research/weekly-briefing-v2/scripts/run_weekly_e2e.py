@@ -1305,6 +1305,12 @@ def sentence_excerpt(value: Any, limit: int = 900) -> str:
     return window[:cut].rstrip(" ,;:-") + "…"
 
 
+def reader_prose(value: Any, limit: int = 900) -> str:
+    """Normalize repository prose for direct HTML/PDF display."""
+    text = str(value or "").replace("**", "").replace("__", "").replace("`", "")
+    return sentence_excerpt(text, limit)
+
+
 def _openalex_json(url: str, cache_path: Path) -> dict[str, Any]:
     cached = read_json(cache_path, {})
     if isinstance(cached, dict) and cached.get("cached_at") and isinstance(cached.get("payload"), dict):
@@ -1630,7 +1636,7 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
         papers.append(f'''<section class="paper">
           <div class="paper-index">{index:02d}</div><h2>{title_html}</h2>
           <div class="meta">{esc(paper.get("published"))} · {esc(source_label(paper))}</div>
-          <p class="abstract">{esc(sentence_excerpt(paper.get("abstract"), 900))}</p>
+          <p class="abstract">{esc(reader_prose(paper.get("abstract"), 900))}</p>
           {analysis_html}
           <div class="team"><h3>作者团队与研究路径</h3>
             <p><strong>机构：</strong>{esc("、".join(team.get("institutions") or []) or "公开来源未提供可靠机构信息")}</p>
@@ -1671,9 +1677,13 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
         "semantic_reserves": "模型备用",
         "semantic_evaluation_failures": "语义评审失败",
     }
+    cover_stat_keys = (
+        "raw_candidates", "candidate_deduped", "semantic_evaluated",
+        "semantic_reserves", "selected_count", "deep_analysis_count",
+    )
     stats_html = ''.join(
         f'<div class="stat" data-stat-key="{esc(k)}"><b>{esc(v)}</b><span>{esc(stat_labels.get(k, k))}</span></div>'
-        for k, v in stats.items()
+        for k in cover_stat_keys if (v := stats.get(k)) is not None
     )
     queries_html = ''.join(f'<li>{esc(item)}</li>' for item in queries)
     overview_html = ''

@@ -138,7 +138,7 @@ class ReportRendererTests(unittest.TestCase):
             self.assertIn("https://doi.org/10.1000/decoder", html_text)
             self.assertIn("跨论文方法与证据对比", html_text)
             self.assertNotIn("weixin", html_text.lower())
-            self.assertIn('<b>0</b><span>跨周去重</span>', html_text)
+            self.assertIn('<b>18</b><span>候选总数</span>', html_text)
             self.assertNotIn('<b></b>', html_text)
             self.assertNotIn('.method-step,.team,.author,table,tr', html_text)
             receipt = runner.validate_report_quality(papers, html_text)
@@ -166,6 +166,30 @@ class ReportRendererTests(unittest.TestCase):
             excerpt = runner.sentence_excerpt(papers[0]["abstract"], 120)
             self.assertLessEqual(len(excerpt), 121)
             self.assertTrue(excerpt.endswith((".", "。", "！", "？", "…")))
+
+    def test_cover_uses_curated_semantic_stats_and_cleans_source_markdown(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paper = self.sample_papers()[0]
+            paper["abstract"] = "We introduce **SmokeViz** with `portable` annotations."
+            paper["semantic_evaluation"] = {"reason": "语义相关"}
+            stats = {
+                "raw_candidates": 120,
+                "candidate_deduped": 90,
+                "semantic_evaluated": 80,
+                "semantic_reserves": 10,
+                "selected_count": 5,
+                "deep_analysis_count": 5,
+                "evidence_quarantined": 22,
+                "analysis_failures_isolated": 0,
+            }
+            html_text = runner.make_report_html(
+                "2026-W41", [paper], stats, [], Path(raw) / "report.html"
+            )
+        self.assertEqual(6, html_text.count('class="stat"'))
+        self.assertNotIn("evidence_quarantined", html_text)
+        self.assertNotIn("analysis_failures_isolated", html_text)
+        self.assertIn("We introduce SmokeViz with portable annotations.", html_text)
+        self.assertNotIn("**SmokeViz**", html_text)
 
     def test_source_labels_never_expose_cache_filenames(self):
         self.assertEqual(runner.source_label({"arxiv_id": "2307.00104", "source": "existing:w36_arxiv_raw.json"}), "arXiv")

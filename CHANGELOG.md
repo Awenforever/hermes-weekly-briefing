@@ -13,6 +13,9 @@
   a valid selection instead of silently publishing a mechanical keyword list.
 - Add an auditable semantic-selection receipt with profile, evaluations,
   portfolio rationale, model provenance and isolated candidate failures.
+- Keep the report cover to six reader-facing selection metrics so audit-only
+  counters cannot spill into a near-empty second page; normalize lightweight
+  Markdown residue in repository abstracts before direct HTML/PDF display.
 
 ## 4.9.0 - 2026-10-05
 
