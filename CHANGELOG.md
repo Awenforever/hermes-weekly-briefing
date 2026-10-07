@@ -1,5 +1,16 @@
 # Changelog
 
+## 5.0.1 - 2026-10-07
+
+- Retry transient semantic-selection failures as bounded whole operations while
+  preserving the configured Hermes primary-to-fallback model route.
+- Never amplify a systemic provider or transport outage into one immediate
+  request per candidate; per-paper isolation is reserved for a successful but
+  incomplete model response.
+- Preserve redacted failure diagnostics and retry provenance so a failed run
+  identifies the real route, validation or transport problem without exposing
+  credentials.
+
 ## 5.0.0 - 2026-10-07
 
 - Move topical relevance and final portfolio selection from lexical Boolean

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -139,6 +141,56 @@ def _call_with_fallback(
     }
 
 
+def _safe_error(exc: BaseException) -> str:
+    """Return a bounded diagnostic without leaking credentials or query secrets."""
+    message = re.sub(r"\s+", " ", str(exc or "")).strip()
+    message = re.sub(
+        r"(?i)(api[_-]?key|authorization|token|secret|password)(\s*[:=]\s*)([^\s,;]+)",
+        r"\1\2<redacted>",
+        message,
+    )
+    message = re.sub(r"(?i)bearer\s+[a-z0-9._~+/=-]+", "Bearer <redacted>", message)
+    return f"{type(exc).__name__}: {message[:500]}" if message else type(exc).__name__
+
+
+def _selection_retry_policy(config: dict[str, Any]) -> tuple[int, list[float]]:
+    analysis = config.get("analysis") if isinstance(config.get("analysis"), dict) else {}
+    attempts = min(5, max(1, int(analysis.get("selection_attempts") or 3)))
+    raw_delays = analysis.get("selection_retry_delays_seconds")
+    if isinstance(raw_delays, list):
+        delays = [min(60.0, max(0.0, float(value))) for value in raw_delays[: attempts - 1]]
+    else:
+        delays = [4.0, 12.0, 24.0, 40.0][: attempts - 1]
+    while len(delays) < attempts - 1:
+        delays.append(delays[-1] if delays else 4.0)
+    return attempts, delays
+
+
+def _call_selection_with_retries(
+    config: dict[str, Any],
+    hermes_home: Path,
+    system: str,
+    request: dict[str, Any],
+    validator: Callable[[dict[str, Any]], bool] | None,
+    *,
+    operation: str,
+) -> tuple[dict[str, Any], dict[str, Any], int, list[str]]:
+    """Retry one semantic operation without multiplying a systemic outage per paper."""
+    attempts, delays = _selection_retry_policy(config)
+    errors: list[str] = []
+    for attempt in range(1, attempts + 1):
+        try:
+            result, route = _call_with_fallback(
+                config, hermes_home, system, request, validator
+            )
+            return result, route, attempt, errors
+        except Exception as exc:
+            errors.append(f"{operation} attempt {attempt}/{attempts}: {_safe_error(exc)}")
+            if attempt < attempts:
+                time.sleep(delays[attempt - 1])
+    raise RuntimeError("; ".join(errors))
+
+
 def _candidate_for_selection(paper: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(paper.get("canonical_id") or ""),
@@ -206,6 +258,8 @@ def select_papers_semantically(
     evaluations: dict[str, dict[str, Any]] = {}
     routes: list[dict[str, Any]] = []
     failures: list[str] = []
+    evaluation_errors: list[str] = []
+    evaluation_attempts = 0
     size = max(1, min(20, int(batch_size)))
     for start in range(0, len(candidates), size):
         batch = candidates[start:start + size]
@@ -230,29 +284,40 @@ def select_papers_semantically(
             },
             "candidates": batch,
         }
+        batch_failed = False
         try:
-            result, route = _call_with_fallback(
+            result, route, attempts_used, retry_errors = _call_selection_with_retries(
                 config,
                 hermes_home,
                 evaluation_system,
                 request,
                 lambda value: isinstance(value.get("evaluations"), dict),
+                operation=f"evaluation batch {start // size + 1}",
             )
+            evaluation_attempts += attempts_used
+            evaluation_errors.extend(retry_errors)
             routes.append(route)
             records = result.get("evaluations") if isinstance(result.get("evaluations"), dict) else {}
-        except Exception:
+        except Exception as exc:
+            evaluation_attempts += _selection_retry_policy(config)[0]
+            evaluation_errors.append(_safe_error(exc))
             records = {}
+            failures.extend(item["id"] for item in batch)
+            batch_failed = True
         missing = [item for item in batch if not _evaluation_complete(records.get(item["id"]))]
         for item in batch:
             record = records.get(item["id"])
             if _evaluation_complete(record):
                 evaluations[item["id"]] = record
-        # A malformed batch is isolated per paper so one bad record cannot erase
-        # the rest of the week's candidate pool.
+        # Only a successful but incomplete response is isolated per paper. A
+        # systemic call failure was already retried as a batch and must not be
+        # multiplied by the number of candidates.
+        if batch_failed:
+            continue
         for item in missing:
             single_request = {**request, "candidates": [item]}
             try:
-                result, route = _call_with_fallback(
+                result, route, attempts_used, retry_errors = _call_selection_with_retries(
                     config,
                     hermes_home,
                     evaluation_system,
@@ -260,17 +325,26 @@ def select_papers_semantically(
                     lambda value, paper_id=item["id"]: _evaluation_complete(
                         (value.get("evaluations") or {}).get(paper_id)
                     ),
+                    operation=f"evaluation paper {item['id']}",
                 )
+                evaluation_attempts += attempts_used
+                evaluation_errors.extend(retry_errors)
                 routes.append(route)
                 record = (result.get("evaluations") or {}).get(item["id"])
                 if not _evaluation_complete(record):
                     raise RuntimeError("semantic evaluation remained incomplete")
                 evaluations[item["id"]] = record
-            except Exception:
+            except Exception as exc:
                 failures.append(item["id"])
+                evaluation_attempts += _selection_retry_policy(config)[0]
+                evaluation_errors.append(_safe_error(exc))
 
     if not evaluations:
-        raise RuntimeError("semantic paper selection failed: no candidate received a valid model evaluation")
+        detail = "; ".join(dict.fromkeys(evaluation_errors))[:1600]
+        raise RuntimeError(
+            "semantic paper selection failed: no candidate received a valid model evaluation"
+            + (f"; diagnostics: {detail}" if detail else "")
+        )
 
     # The final model compares candidates globally and owns the portfolio choice.
     # Numeric scores only bound the context window; they never become a hidden
@@ -288,10 +362,11 @@ def select_papers_semantically(
     if not shortlist:
         return [], {
             "evaluations": evaluations, "selected_ids": [], "reserve_ids": [],
-            "evaluation_failures": failures,
+            "evaluation_failures": failures, "evaluation_errors": evaluation_errors,
         }, {
             **(routes[-1] if routes else {}), "fallback_used": any(r.get("fallback_used") for r in routes),
-            "evaluation_calls": len(routes), "portfolio_calls": 0,
+            "evaluation_calls": len(routes), "evaluation_attempts": evaluation_attempts,
+            "portfolio_calls": 0, "portfolio_attempts": 0,
         }
 
     portfolio_system = (
@@ -314,12 +389,13 @@ def select_papers_semantically(
         "candidates": shortlist,
     }
     valid_ids = {item["id"] for item in shortlist}
-    result, portfolio_route = _call_with_fallback(
+    result, portfolio_route, portfolio_attempts, portfolio_errors = _call_selection_with_retries(
         config,
         hermes_home,
         portfolio_system,
         portfolio_request,
         lambda value: any(str(item) in valid_ids for item in (value.get("selected_ids") or [])),
+        operation="portfolio selection",
     )
     routes.append(portfolio_route)
     selected_ids = []
@@ -347,12 +423,16 @@ def select_papers_semantically(
         "reserve_ids": reserve_ids,
         "editorial_rationale": str(result.get("editorial_rationale") or ""),
         "evaluation_failures": failures,
+        "evaluation_errors": evaluation_errors,
+        "portfolio_errors": portfolio_errors,
     }
     provenance = {
         **portfolio_route,
         "fallback_used": any(bool(route.get("fallback_used")) for route in routes),
         "evaluation_calls": max(0, len(routes) - 1),
+        "evaluation_attempts": evaluation_attempts,
         "portfolio_calls": 1,
+        "portfolio_attempts": portfolio_attempts,
         "evaluated_count": len(evaluations),
         "selection_failure_count": len(failures),
     }

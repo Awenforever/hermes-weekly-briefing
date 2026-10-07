@@ -146,3 +146,23 @@ Cross-week dedup is delivery state, not discovery state. Never mutate it during
 selection, analysis, rendering or a dry-run. Commit selected identifiers only
 after email delivery is confirmed; otherwise an unseen paper would disappear
 from later weeks.
+
+## Semantic model failures must remain diagnosable and bounded
+
+A model selection outage is not a malformed-paper problem. Never catch a whole
+batch exception, erase its cause, and immediately retry every candidate as an
+individual request. That pattern hides whether primary and fallback routing
+failed and multiplies load exactly when the shared route is unhealthy.
+
+Each evaluation batch and the portfolio decision are one bounded semantic
+operation. They retry with explicit backoff through the configured Hermes
+primary/fallback route. If the operation still fails, record redacted exception
+types/messages and fail that operation without per-paper fan-out. Per-paper
+isolation is allowed only after a successful batch response omitted or
+malformed particular records. Diagnostics must redact credentials, be bounded
+in size, and expose attempt counts in selection provenance.
+
+Release acceptance counts only complete runs of the exact final revision.
+Changing selection, retry, rendering or delivery code resets the consecutive
+clean-run streak. A failed run is evidence to fix, never a result to omit from
+the count.

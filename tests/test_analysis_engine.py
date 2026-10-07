@@ -194,7 +194,91 @@ class AnalysisEngineTests(unittest.TestCase):
         paper = {"canonical_id": "paper:a", "title": "A", "abstract": "Evidence" * 30}
         with _router(call):
             with self.assertRaisesRegex(RuntimeError, "no candidate received"):
-                engine.select_papers_semantically([paper], {}, {}, Path("."), 1)
+                engine.select_papers_semantically(
+                    [paper], {}, {"analysis": {"selection_attempts": 1}}, Path("."), 1
+                )
+
+    def test_semantic_selection_retries_systemic_batch_without_per_paper_amplification(self):
+        calls = []
+        papers = [
+            {"canonical_id": "paper:a", "title": "A", "abstract": "Evidence A"},
+            {"canonical_id": "paper:b", "title": "B", "abstract": "Evidence B"},
+        ]
+        def call(**kwargs):
+            request = json.loads(kwargs["messages"][1]["content"])
+            calls.append(request)
+            if len(calls) == 1:
+                raise TimeoutError("temporary upstream timeout")
+            if "逐篇" in request["task"]:
+                payload = {"evaluations": {
+                    item["id"]: {
+                        "classification": "core", "overall_score": 90,
+                        "reason": "语义相关", "profile_connections": ["主题"],
+                    } for item in request["candidates"]
+                }}
+            else:
+                payload = {"selected_ids": ["paper:a"], "reserve_ids": ["paper:b"]}
+            return {"content": json.dumps(payload, ensure_ascii=False)}
+        config = {"analysis": {
+            "selection_attempts": 2, "selection_retry_delays_seconds": [0]
+        }}
+        with _router(call):
+            ordered, receipt, provenance = engine.select_papers_semantically(
+                papers, {}, config, Path("."), 1
+            )
+        self.assertEqual(["paper:a", "paper:b"], [item["canonical_id"] for item in ordered])
+        self.assertEqual(3, len(calls))
+        self.assertEqual(2, len(calls[0]["candidates"]))
+        self.assertEqual(2, len(calls[1]["candidates"]))
+        self.assertEqual(2, provenance["evaluation_attempts"])
+        self.assertTrue(receipt["evaluation_errors"])
+
+    def test_systemic_failure_is_bounded_diagnostic_and_redacts_secret(self):
+        calls = []
+        def call(**_kwargs):
+            calls.append(1)
+            raise RuntimeError("HTTP 403 api_key=do-not-leak token:also-secret")
+        config = {"analysis": {
+            "selection_attempts": 2, "selection_retry_delays_seconds": [0]
+        }}
+        paper = {"canonical_id": "paper:a", "title": "A", "abstract": "Evidence"}
+        with _router(call):
+            with self.assertRaises(RuntimeError) as raised:
+                engine.select_papers_semantically([paper], {}, config, Path("."), 1)
+        message = str(raised.exception)
+        self.assertEqual(2, len(calls))
+        self.assertIn("HTTP 403", message)
+        self.assertNotIn("do-not-leak", message)
+        self.assertNotIn("also-secret", message)
+
+    def test_successful_incomplete_batch_isolated_per_paper(self):
+        calls = []
+        papers = [
+            {"canonical_id": "paper:a", "title": "A", "abstract": "A"},
+            {"canonical_id": "paper:b", "title": "B", "abstract": "B"},
+        ]
+        def evaluation(paper_id):
+            return {
+                "classification": "core", "overall_score": 90,
+                "reason": "语义相关", "profile_connections": ["主题"],
+            }
+        def call(**kwargs):
+            request = json.loads(kwargs["messages"][1]["content"])
+            calls.append(request)
+            if "逐篇" not in request["task"]:
+                return {"content": json.dumps({"selected_ids": ["paper:a"], "reserve_ids": ["paper:b"]})}
+            ids = [item["id"] for item in request["candidates"]]
+            records = {"paper:a": evaluation("paper:a")} if len(ids) > 1 else {ids[0]: evaluation(ids[0])}
+            return {"content": json.dumps({"evaluations": records}, ensure_ascii=False)}
+        config = {"analysis": {"selection_attempts": 1}}
+        with _router(call):
+            ordered, receipt, _ = engine.select_papers_semantically(
+                papers, {}, config, Path("."), 1
+            )
+        self.assertEqual({"paper:a", "paper:b"}, set(receipt["evaluations"]))
+        self.assertEqual(3, len(calls))
+        self.assertEqual(["paper:b"], [item["id"] for item in calls[1]["candidates"]])
+        self.assertEqual(["paper:a", "paper:b"], [item["canonical_id"] for item in ordered])
 
 
 if __name__ == "__main__":
