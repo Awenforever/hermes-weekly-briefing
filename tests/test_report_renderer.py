@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -184,7 +185,7 @@ class ReportRendererTests(unittest.TestCase):
         terms = runner.direction_terms(config)
         self.assertEqual(("protein folding", "drug discovery"), terms)
         self.assertTrue(runner.direction_verdict({"title": "Graph Models for Protein Folding"}, terms)[0])
-        self.assertFalse(runner.direction_verdict(
+        self.assertTrue(runner.direction_verdict(
             {"title": "Sensing Assisted Satellite Backhaul for Massive IoT"},
             ("satellite remote sensing",),
         )[0])
@@ -201,6 +202,7 @@ class ReportRendererTests(unittest.TestCase):
                 "minimum_any": 1,
                 "none_terms": ["survey"],
                 "fields": ["title", "abstract", "keywords"],
+                "mode": "strict",
             },
         }}
         policy = runner.relevance_policy(config)
@@ -227,6 +229,7 @@ class ReportRendererTests(unittest.TestCase):
             "all_groups": [["graph neural network", "GNN"], ["failure recovery"]],
             "any_terms": ["evaluation"], "minimum_any": 1,
             "fields": ["title", "abstract"],
+            "mode": "strict",
         }}})
         unrelated = {
             "title": "Task planning with language models",
@@ -239,6 +242,43 @@ class ReportRendererTests(unittest.TestCase):
             "required_concepts_not_related",
             runner.direction_verdict(unrelated, policy)[1],
         )
+
+    def test_semantic_relevance_treats_concepts_as_profile_not_hard_gate(self):
+        config = {"research": {
+            "core_keywords": ["combustion instability"],
+            "relevance": {
+                "all_groups": [["combustion instability"], ["reduced order model"]],
+                "any_terms": ["experiment"],
+                "minimum_any": 1,
+                "none_terms": ["medical imaging"],
+            },
+        }}
+        policy = runner.relevance_policy(config)
+        self.assertEqual("semantic", policy["mode"])
+        accepted, reason = runner.direction_verdict({
+            "title": "Data-driven prediction of thermoacoustic oscillations",
+            "abstract": "A neural surrogate predicts nonlinear pressure dynamics.",
+        }, policy)
+        self.assertTrue(accepted)
+        self.assertEqual("semantic_selection_pending", reason)
+        self.assertFalse(runner.direction_verdict({
+            "title": "Medical imaging benchmark", "abstract": "medical imaging dataset"
+        }, policy)[0])
+
+    def test_research_profile_contains_only_config_and_confirmed_user_feedback(self):
+        config = {"research": {
+            "core_keywords": ["protein folding"],
+            "method_keywords": ["graph neural networks"],
+            "use_user_feedback": True,
+        }}
+        feedback = {"biases": [
+            {"source": "user", "topic": "molecular dynamics", "direction": "increase"},
+            {"source": "model", "topic": "ignore me", "direction": "increase"},
+        ]}
+        profile = runner.build_research_profile(config, feedback)
+        self.assertEqual(["protein folding"], profile["core_topics"])
+        self.assertEqual(["molecular dynamics"], [item["topic"] for item in profile["confirmed_user_feedback"]])
+        self.assertNotIn("ignore me", json.dumps(profile))
 
     def test_untrusted_metadata_payload_is_rejected_before_model_analysis(self):
         candidate = {

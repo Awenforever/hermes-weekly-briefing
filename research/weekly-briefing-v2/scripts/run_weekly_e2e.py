@@ -34,7 +34,11 @@ RUNTIME_PATH = Path(RUNTIME_PATH_RAW).expanduser() if RUNTIME_PATH_RAW else None
 if RUNTIME_PATH is not None and RUNTIME_PATH.is_dir() and str(RUNTIME_PATH) not in sys.path:
     sys.path.insert(0, str(RUNTIME_PATH))
 
-from weekly_analysis_engine import analyze_papers_resilient, incomplete_analysis_ids
+from weekly_analysis_engine import (
+    analyze_papers_resilient,
+    incomplete_analysis_ids,
+    select_papers_semantically,
+)
 
 MARKER = "HERMES_WEEKLY_E2E_RUNNER_V1"
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
@@ -95,13 +99,12 @@ def direction_terms(config: dict[str, Any]) -> tuple[str, ...]:
 
 
 def relevance_policy(config: dict[str, Any]) -> dict[str, Any]:
-    """Return a normalized, auditable Boolean relevance policy.
+    """Return normalized research concepts and any explicit strict policy.
 
-    ``all_groups`` is AND across groups and OR within each group, which lets a
-    user require several concepts while retaining synonyms. ``any_terms`` is a
-    separate pool controlled by ``minimum_any``; ``none_terms`` is a hard NOT.
-    Existing installations without this block retain their legacy one-of
-    direction-term behavior and title-only matching.
+    Concepts are semantic profile and retrieval hints by default. They become
+    deterministic admission rules only when a user explicitly chooses
+    ``mode=strict``. Hard exclusions remain hard because they are explicit user
+    intent rather than an inferred topical judgment.
     """
     research = config.get("research") if isinstance(config.get("research"), dict) else {}
     raw = research.get("relevance") if isinstance(research.get("relevance"), dict) else None
@@ -109,7 +112,7 @@ def relevance_policy(config: dict[str, Any]) -> dict[str, Any]:
         terms = list(direction_terms(config))
         return {
             "all_groups": [], "any_terms": terms, "minimum_any": 1 if terms else 0,
-            "none_terms": [], "fields": ["title"], "legacy": True,
+            "none_terms": [], "fields": ["title"], "legacy": True, "mode": "semantic",
         }
 
     groups: list[list[str]] = []
@@ -142,6 +145,7 @@ def relevance_policy(config: dict[str, Any]) -> dict[str, Any]:
         "none_terms": none_terms,
         "fields": list(dict.fromkeys(fields)),
         "concept_scope": str(raw.get("concept_scope") or "same_segment").strip().casefold(),
+        "mode": "strict" if str(raw.get("mode") or "semantic").strip().casefold() == "strict" else "semantic",
         "legacy": False,
     }
 
@@ -234,12 +238,12 @@ def _published_date(c: dict[str, Any]) -> dt.date | None:
 
 
 def direction_verdict(c: dict[str, Any], policy: Any) -> tuple[bool, str]:
-    """Apply Boolean relevance and future-date gates without model guessing."""
+    """Apply only objective and explicitly requested deterministic gates."""
     if not isinstance(policy, dict):
         terms = [str(term) for term in (policy or ())]
         policy = {
             "all_groups": [], "any_terms": terms, "minimum_any": 1 if terms else 0,
-            "none_terms": [], "fields": ["title"], "legacy": True,
+            "none_terms": [], "fields": ["title"], "legacy": True, "mode": "semantic",
         }
     parts = []
     for field in policy.get("fields") or ["title"]:
@@ -252,6 +256,11 @@ def direction_verdict(c: dict[str, Any], policy: Any) -> tuple[bool, str]:
     excluded = [term for term in policy.get("none_terms") or [] if _term_matches(text, term)]
     if excluded:
         return False, "excluded:" + excluded[0]
+    published = _published_date(c)
+    if published and published.year > dt.date.today().year:
+        return False, "future_dated:" + published.isoformat()
+    if policy.get("mode") != "strict":
+        return True, "semantic_selection_pending"
     for index, group in enumerate(policy.get("all_groups") or [], start=1):
         if not any(_term_matches(text, term) for term in group):
             return False, f"missing_required_group:{index}"
@@ -267,10 +276,7 @@ def direction_verdict(c: dict[str, Any], policy: Any) -> tuple[bool, str]:
     any_hits = [term for term in any_terms if _term_matches(text, term)]
     if len(any_hits) < int(policy.get("minimum_any") or 0):
         return False, f"minimum_any:{len(any_hits)}/{int(policy.get('minimum_any') or 0)}"
-    published = _published_date(c)
-    if published and published.year > dt.date.today().year:
-        return False, "future_dated:" + published.isoformat()
-    return True, "on_direction_boolean" if not policy.get("legacy") else "on_direction"
+    return True, "on_direction_strict"
 
 
 def freshness_bonus(c: dict[str, Any]) -> int:
@@ -1037,6 +1043,40 @@ def feedback_score_adjustment(
     return max(-4.0, min(2.0, adjustment))
 
 
+def build_research_profile(
+    config: dict[str, Any], feedback: dict[str, Any]
+) -> dict[str, Any]:
+    """Build an auditable model-facing profile without inventing preferences."""
+    research = config.get("research") if isinstance(config.get("research"), dict) else {}
+    policy = relevance_policy(config)
+    confirmed_feedback = []
+    for item in _user_feedback_biases(config, feedback):
+        confirmed_feedback.append({
+            "topic": str(item.get("topic") or item.get("keyword") or ""),
+            "direction": str(item.get("direction") or ""),
+            "note": str(item.get("note") or "")[:500],
+        })
+    return {
+        "core_topics": [str(value) for value in research.get("core_keywords") or [] if str(value).strip()],
+        "methods": [str(value) for value in research.get("method_keywords") or [] if str(value).strip()],
+        "cross_domain_interests": [
+            str(value) for value in research.get("cross_domain_interests") or [] if str(value).strip()
+        ],
+        "user_search_phrases": [
+            str(value) for value in research.get("search_queries") or [] if str(value).strip()
+        ],
+        "concept_groups": policy.get("all_groups") or [],
+        "supporting_concepts": policy.get("any_terms") or [],
+        "explicit_exclusions": policy.get("none_terms") or [],
+        "selection_mode": policy.get("mode") or "semantic",
+        "confirmed_user_feedback": confirmed_feedback,
+        "interpretation": (
+            "These concepts describe the user's research interests and aid retrieval. "
+            "They are not literal keyword admission requirements unless selection_mode is strict."
+        ),
+    }
+
+
 def build_queries(config: dict[str, Any], _profile: dict[str, Any], feedback: dict[str, Any]) -> list[str]:
     research_cfg = config.get("research", {}) if isinstance(config, dict) else {}
     explicit = research_cfg.get("search_queries") if isinstance(research_cfg.get("search_queries"), list) else []
@@ -1052,10 +1092,8 @@ def build_queries(config: dict[str, Any], _profile: dict[str, Any], feedback: di
             "increase", "force_explore", "boost",
         }:
             base.append(str(item.get("topic") or item.get("keyword") or ""))
-    # Push the same required concepts used by post-filtering down into discovery.
-    # Each group represents synonyms (OR); choosing one value from every group
-    # creates an AND-style query. Bound the cartesian product so broad synonym
-    # sets cannot multiply provider traffic without limit.
+    # Concept groups broaden retrieval. Combinations are useful query variants,
+    # not evidence that every returned paper must contain their literal words.
     policy = relevance_policy(config)
     groups = [list(group)[:3] for group in policy.get("all_groups") or [] if group]
     policy_queries: list[str] = []
@@ -1066,9 +1104,8 @@ def build_queries(config: dict[str, Any], _profile: dict[str, Any], feedback: di
             joined = " ".join(combo)
             policy_queries.append(joined)
             policy_queries.extend(f"{joined} {term}" for term in any_terms[:2])
-    # Required-concept queries take precedence over broad keywords when the
-    # provider query budget is capped.
-    base = [*policy_queries, *base]
+    concept_queries = [term for group in groups for term in group]
+    base = [*base, *concept_queries, *policy_queries]
     cleaned = []
     for q in base:
         q = normalize_title(str(q))
@@ -1396,6 +1433,11 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
         lines.append("")
         lines.append(str(narrative["overview"]))
         lines.append("")
+    if narrative.get("editorial_rationale"):
+        lines.append("## 本期选稿说明")
+        lines.append("")
+        lines.append(str(narrative["editorial_rationale"]))
+        lines.append("")
     lines.append("## 入选论文")
     if not selected:
         lines.append("- 未入选论文。")
@@ -1412,6 +1454,9 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
             lines.append(f"- **发表：** {s['published']}")
         if s.get("authors"):
             lines.append(f"- **作者：** {', '.join(s['authors'][:5])}")
+        semantic = s.get("semantic_evaluation") if isinstance(s.get("semantic_evaluation"), dict) else {}
+        if semantic.get("reason"):
+            lines.append(f"- **入选理由：** {semantic['reason']}")
         team = s.get("team_profile") if isinstance(s.get("team_profile"), dict) else {}
         if team.get("institutions"):
             lines.append(f"- **作者团队：** {', '.join(team['institutions'][:4])}")
@@ -1570,8 +1615,13 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
                 )
         evidence_items = ''.join(f'<li>{esc(item)}</li>' for item in list(analysis.get("evidence") or []))
         limitation_items = ''.join(f'<li>{esc(item)}</li>' for item in list(analysis.get("limitations") or []))
+        semantic = paper.get("semantic_evaluation") if isinstance(paper.get("semantic_evaluation"), dict) else {}
+        selection_html = (
+            f'<div class="selection-reason"><strong>入选理由</strong><p>{esc(semantic.get("reason"))}</p></div>'
+            if semantic.get("reason") else ''
+        )
         analysis_html = f'''
-          <div class="analysis"><h3>研究问题</h3><p>{esc(analysis.get("problem") or "等待深度分析")}</p>
+          {selection_html}<div class="analysis"><h3>研究问题</h3><p>{esc(analysis.get("problem") or "等待深度分析")}</p>
           <h3>为什么值得关注</h3><p>{esc(analysis.get("why_it_matters") or "等待深度分析")}</p>
           <h3>方法链</h3><div class="method-tree">{''.join(method_steps) or '<div class="missing">暂无可靠方法拆解</div>'}</div>
           <h3>关键证据</h3><ul>{evidence_items or '<li>暂无可核验证据摘要</li>'}</ul>
@@ -1609,13 +1659,17 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
         "raw_candidates": "候选总数",
         "candidate_deduped": "候选去重后",
         "cross_week_deduped": "跨周去重",
-        "hard_filter_passed": "严格筛选通过",
+        "hard_filter_passed": "客观清洗通过",
         "selected_count": "本期入选",
         "rejected_count": "筛除总数",
-        "off_direction_rejected": "偏离主题筛除",
+        "off_direction_rejected": "规则明确排除",
         "future_dated_rejected": "未来日期筛除",
         "queries": "检索式",
         "deep_analysis_count": "深度分析",
+        "semantic_evaluated": "模型语义评审",
+        "semantic_selected": "模型首选",
+        "semantic_reserves": "模型备用",
+        "semantic_evaluation_failures": "语义评审失败",
     }
     stats_html = ''.join(
         f'<div class="stat" data-stat-key="{esc(k)}"><b>{esc(v)}</b><span>{esc(stat_labels.get(k, k))}</span></div>'
@@ -1627,6 +1681,8 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
         overview_html += f'<section class="focus"><h1>发现方式说明</h1><p class="note">{esc(narrative["discovery_note"])}</p></section>'
     if narrative.get("overview"):
         overview_html += f'<section class="focus"><h1>本周总体判断</h1><p>{esc(narrative["overview"])}</p></section>'
+    if narrative.get("editorial_rationale"):
+        overview_html += f'<section class="focus"><h1>本期选稿说明</h1><p>{esc(narrative["editorial_rationale"])}</p></section>'
     tail_html = ''
     for key, heading in (("literature_position", "文献定位回顾"), ("cross_paper_synthesis", "跨论文综合")):
         items = narrative.get(key) if isinstance(narrative.get(key), list) else []
@@ -1664,7 +1720,7 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
       .author span {{ color:#52657a; }} .author .recent {{ margin-top:2mm; border-top:1px solid #e2e8f0; padding-top:2mm; }} .author .recent ul {{ margin:1mm 0 0; padding-left:4mm; }}
       .focus,.synthesis {{ page-break-before:always; }} .note {{ padding:4mm; background:#fff7df; border-radius:2mm; color:#66531c; }}
       .synthesis-grid {{ display:grid; grid-template-columns:repeat(2,1fr); gap:3mm; margin-bottom:5mm; }} .synthesis-card {{ background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; }} .synthesis-card b,.synthesis-card span {{ display:block; }} .synthesis-card span {{ color:#40566d; margin-top:1mm; }}
-      .analysis {{ margin:4mm 0; }} .method-tree {{ display:grid; gap:2mm; margin:2mm 0 4mm; }}
+      .analysis {{ margin:4mm 0; }} .selection-reason {{ margin:4mm 0; padding:3mm 4mm; background:#f0f7f4; border-left:3px solid #2f855a; border-radius:1.5mm; }} .selection-reason p {{ margin:1mm 0 0; }} .method-tree {{ display:grid; gap:2mm; margin:2mm 0 4mm; }}
       .method-step {{ display:grid; grid-template-columns:42mm 1fr; gap:3mm; background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; border-radius:1.5mm; }}
       .method-step span {{ color:#40566d; }} .missing {{ color:#8a5b00; background:#fff7df; padding:3mm; }}
       .team,.author-grid {{ break-inside:auto; page-break-inside:auto; }}
@@ -2194,6 +2250,24 @@ def main() -> int:
         evidence_pool, quarantined, evidence_stats = prepare_evidence_pool(
             filtered, args.max_selected
         )
+        for paper in evidence_pool:
+            paper["canonical_id"] = canonical_id(paper)
+        research_profile = build_research_profile(config, feedback)
+        semantic_order, semantic_receipt, semantic_provenance = select_papers_semantically(
+            evidence_pool,
+            research_profile,
+            config,
+            HERMES_HOME,
+            args.max_selected,
+        )
+        write_json(outdir / "semantic_selection_receipt.json", {
+            "version": 1,
+            "week": week,
+            "generated_at": now_iso(),
+            "research_profile": research_profile,
+            "selection": semantic_receipt,
+            "provenance": semantic_provenance,
+        })
         selected: list[dict[str, Any]] = []
 
         stats = {
@@ -2205,14 +2279,18 @@ def main() -> int:
             "selected_count": 0,
             "rejected_count": len(rejected),
             "off_direction_rejected": len(off_direction),
-            "relevance_policy": "legacy_or" if policy.get("legacy") else "boolean",
+            "relevance_policy": "strict_boolean" if policy.get("mode") == "strict" else "semantic_model",
             "future_dated_rejected": len(future_dated),
             "queries": len(queries),
             "selected_discovery_sources": [],
+            "semantic_evaluated": len(semantic_receipt.get("evaluations") or {}),
+            "semantic_selected": len(semantic_receipt.get("selected_ids") or []),
+            "semantic_reserves": len(semantic_receipt.get("reserve_ids") or []),
+            "semantic_evaluation_failures": len(semantic_receipt.get("evaluation_failures") or []),
         }
 
         if args.discovery_only:
-            selected = select_source_diverse(evidence_pool, args.max_selected)
+            selected = semantic_order[:args.max_selected]
             stats["selected_count"] = len(selected)
             stats["selected_discovery_sources"] = sorted({
                 source for paper in selected
@@ -2227,7 +2305,7 @@ def main() -> int:
                 "stats": stats,
                 "queries": queries,
                 "selected": selected,
-                "note": "Selected papers ready for LLM deep analysis phase",
+                "note": "Papers selected by semantic model review and ready for deep analysis",
             }
             CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
             discovery_path = CANDIDATES_DIR / f"{week}_selected.json"
@@ -2246,8 +2324,8 @@ def main() -> int:
         analysis_failures: list[str] = []
         analysis_runs: list[dict[str, Any]] = []
         while len(selected) < max(1, args.max_selected):
-            available = [paper for paper in evidence_pool if canonical_id(paper) not in attempted]
-            proposal = select_source_diverse(available, max(1, args.max_selected - len(selected)))
+            available = [paper for paper in semantic_order if canonical_id(paper) not in attempted]
+            proposal = available[:max(1, args.max_selected - len(selected))]
             if not proposal:
                 break
             for paper in proposal:
@@ -2312,6 +2390,8 @@ def main() -> int:
             "analysis_runs": analysis_runs,
         })
         narrative = analysis_payload.get("narrative") if isinstance(analysis_payload, dict) and isinstance(analysis_payload.get("narrative"), dict) else {}
+        if semantic_receipt.get("editorial_rationale") and not narrative.get("editorial_rationale"):
+            narrative["editorial_rationale"] = semantic_receipt["editorial_rationale"]
         write_json(outdir / "selected_snapshot.json", {
             "version": 1,
             "runner": MARKER,
@@ -2400,6 +2480,7 @@ def main() -> int:
                 "html": "report.html",
                 "pdf": "report.pdf",
                 "selected_snapshot": "selected_snapshot.json",
+                "semantic_selection_receipt": "semantic_selection_receipt.json",
                 "quarantine_receipt": "quarantine_receipt.json",
                 "quality_receipt": "quality_receipt.json",
                 "delivery_receipt": "delivery_receipt.json",
@@ -2414,7 +2495,8 @@ def main() -> int:
             outdir,
             published_outdir,
             [
-                "analysis.json", "selected_snapshot.json", "quarantine_receipt.json",
+                "analysis.json", "selected_snapshot.json", "semantic_selection_receipt.json",
+                "quarantine_receipt.json",
                 "report.md", "report.html", "report.pdf", "quality_receipt.json",
                 "delivery_receipt.json", "manifest.json",
             ],

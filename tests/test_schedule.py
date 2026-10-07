@@ -318,6 +318,7 @@ class ScheduleTests(unittest.TestCase):
                 email_to=["researcher@example.com"],
                 keyword=["quantum error correction", "fault-tolerant computing"],
                 direction_term=["quantum code", "fault-tolerant"],
+                selection_mode="semantic",
                 max_selected=4,
                 timezone="Asia/Shanghai",
                 schedule="30 8 * * 5",
@@ -335,6 +336,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual("Asia/Shanghai", config["schedule"]["timezone"])
             self.assertTrue(config["research"]["use_user_feedback"])
             self.assertEqual(["quantum code", "fault-tolerant"], config["research"]["direction_terms"])
+            self.assertEqual("semantic", config["research"]["relevance"]["mode"])
             self.assertEqual("primary-model", config["analysis"]["model"])
 
     def test_setup_requires_a_reachable_academic_search_engine(self):

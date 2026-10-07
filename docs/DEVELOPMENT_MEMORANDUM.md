@@ -86,28 +86,31 @@ source requires a parser fixture, connectivity probe, dedup compatibility,
 rate bound, and clear credential ownership. Never scrape a website merely to
 inflate the source count.
 
-## Relevance is a deterministic admission policy
+## Semantic relevance belongs to the model, not a keyword gate
 
-The old `direction_terms` gate was OR-only and title-only. A broad word could
-therefore admit an adjacent field and leave the model to choose the least-wrong
-papers. The production policy now supports:
+Keywords, methods, concept groups and cross-domain interests describe the user
+and generate diverse retrieval queries. They are not evidence that a paper is
+relevant, and missing their literal spellings is not evidence that it is not.
+The default pipeline must therefore preserve this order:
 
-- AND across required concept groups;
-- OR among synonyms inside each group;
-- a minimum number of optional terms;
-- hard exclusions; and
-- explicit match fields (title, abstract, keywords, venue).
+1. broad multi-source retrieval;
+2. deterministic identity, date, integrity, dedup and evidence checks;
+3. model evaluation of every viable candidate against the explicit profile;
+4. a second global model comparison that chooses a complementary portfolio and
+   reserve order;
+5. grounded deep analysis of the chosen papers.
 
-Required groups are also combined into bounded provider queries, but provider
-query syntax is never trusted as the final gate. Every returned candidate is
-rechecked locally with the same normalized Boolean policy before ranking or
-model analysis. Public defaults contain no research terms; existing legacy
-profiles retain their former one-of direction behavior until the user chooses
-the richer policy.
+The evaluation must distinguish core, adjacent, exploratory and rejected work,
+and explain semantic or methodological connections using the supplied abstract.
+The portfolio pass, not a lexical score or source quota, owns `selected_ids`.
+If primary and fallback model routing both fail, publication fails closed; never
+silently substitute deterministic keyword ranking.
 
-Strict required concepts must also co-occur in the title or one abstract
-sentence/paragraph. Document-wide co-occurrence is insufficient because two
-unrelated method stages can mention the required concepts independently.
+Boolean AND/OR/co-occurrence logic remains available only when the user
+explicitly sets `research.relevance.mode=strict`. Explicit exclusion terms are
+always enforced. Existing configurations without a `mode` migrate to semantic
+selection so an earlier generated gate cannot continue controlling selection.
+Public defaults contain no author-specific research terms.
 
 ## External scholarly metadata is an untrusted input boundary
 

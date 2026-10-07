@@ -147,6 +147,55 @@ class AnalysisEngineTests(unittest.TestCase):
         self.assertEqual(["bad"], failures)
         self.assertTrue(provenance["isolation_used"])
 
+    def test_semantic_selection_model_owns_relevance_and_portfolio_order(self):
+        calls = []
+        def call(**kwargs):
+            request = json.loads(kwargs["messages"][1]["content"])
+            calls.append(request["task"])
+            kwargs["route_info"]["resolved_model"] = "profile-main"
+            if "逐篇" in request["task"]:
+                payload = {"evaluations": {
+                    item["id"]: {
+                        "classification": "core" if item["id"] == "paper:b" else "adjacent",
+                        "overall_score": 96 if item["id"] == "paper:b" else 82,
+                        "topical_relevance": 95,
+                        "methodological_value": 88,
+                        "novelty_value": 75,
+                        "evidence_confidence": 90,
+                        "reason": "摘要显示明确的语义联系",
+                        "profile_connections": ["研究问题"],
+                    } for item in request["candidates"]
+                }}
+            else:
+                payload = {
+                    "selected_ids": ["paper:b"],
+                    "reserve_ids": ["paper:a"],
+                    "editorial_rationale": "B 更贴近核心问题，A 保留作方法扩展。",
+                }
+            return {"content": json.dumps(payload, ensure_ascii=False)}
+        papers = [
+            {"canonical_id": "paper:a", "title": "A", "abstract": "Evidence A" * 20},
+            {"canonical_id": "paper:b", "title": "B", "abstract": "Evidence B" * 20},
+        ]
+        profile = {"core_topics": ["topic"], "selection_mode": "semantic"}
+        with _router(call):
+            ordered, receipt, provenance = engine.select_papers_semantically(
+                papers, profile, {"analysis": {"model": "profile-main"}}, Path("."), 1
+            )
+        self.assertEqual(["paper:b", "paper:a"], [paper["canonical_id"] for paper in ordered])
+        self.assertEqual(["paper:b"], receipt["selected_ids"])
+        self.assertEqual(["paper:a"], receipt["reserve_ids"])
+        self.assertEqual(2, len(calls))
+        self.assertEqual("profile-main", provenance["actual_model"])
+
+    def test_semantic_selection_does_not_fall_back_to_mechanical_choice(self):
+        def call(**_kwargs):
+            raise RuntimeError("all configured models unavailable")
+        paper = {"canonical_id": "paper:a", "title": "A", "abstract": "Evidence" * 30}
+        with _router(call):
+            with self.assertRaisesRegex(RuntimeError, "no candidate received"):
+                engine.select_papers_semantically([paper], {}, {}, Path("."), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

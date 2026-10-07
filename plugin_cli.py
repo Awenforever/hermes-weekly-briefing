@@ -83,11 +83,15 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup.add_argument("--direction-term", action="append", default=[])
     setup.add_argument(
         "--require-all", action="append", default=[], metavar="TERM|SYNONYM",
-        help="Require one synonym from this group; repeat the option for AND across concepts",
+        help="Add a concept group to the research profile; hard-require only in strict mode",
     )
     setup.add_argument("--require-any", action="append", default=[])
     setup.add_argument("--exclude-term", action="append", default=[])
     setup.add_argument("--minimum-any", type=int, default=None)
+    setup.add_argument(
+        "--selection-mode", choices=("semantic", "strict"), default=None,
+        help="Let the model judge relevance (default), or explicitly enforce Boolean admission",
+    )
     setup.add_argument(
         "--match-field", action="append", default=[],
         choices=("title", "abstract", "keywords", "venue"),
@@ -244,6 +248,9 @@ def _config_diagnostics() -> list[str]:
         )
     relevance = research.get("relevance") if isinstance(research.get("relevance"), dict) else None
     if relevance is not None:
+        mode = str(relevance.get("mode") or "semantic").strip().casefold()
+        if mode not in {"semantic", "strict"}:
+            errors.append("research.relevance.mode must be semantic or strict")
         groups = relevance.get("all_groups") if isinstance(relevance.get("all_groups"), list) else []
         for index, group in enumerate(groups, start=1):
             if not isinstance(group, list) or not any(str(value).strip() for value in group):
@@ -843,6 +850,8 @@ def _configure(args: argparse.Namespace) -> int:
             relevance["minimum_any"] = max(0, args.minimum_any)
         if args.match_field:
             relevance["fields"] = list(dict.fromkeys(args.match_field))
+    if getattr(args, "selection_mode", None):
+        research.setdefault("relevance", {})["mode"] = args.selection_mode
     if args.max_selected is not None:
         config["max_selected"] = max(1, min(10, args.max_selected))
     if args.timezone:
@@ -998,7 +1007,7 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
             getattr(args, name, None) not in (None, [], "")
             for name in (
                 "email_to", "keyword", "direction_term", "require_all", "require_any",
-                "exclude_term", "minimum_any", "match_field", "max_selected", "timezone", "schedule", "provider",
+                "exclude_term", "minimum_any", "match_field", "selection_mode", "max_selected", "timezone", "schedule", "provider",
                 "model", "fallback_model", "use_profile_weights", "use_user_feedback",
                 "search_source", "semantic_scholar_api_key_env",
                 "openalex_api_key_env", "core_api_key_env", "scopus_api_key_env", "scopus_insttoken_env",

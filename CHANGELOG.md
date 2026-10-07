@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.0.0 - 2026-10-07
+
+- Move topical relevance and final portfolio selection from lexical Boolean
+  gates to a two-stage Hermes model review: per-candidate semantic evaluation,
+  followed by global comparative selection and model-ordered reserves.
+- Treat keywords and concept groups as research-profile and retrieval evidence
+  by default; preserve Boolean admission only as an explicit `strict` mode.
+- Keep deterministic rejection for objective integrity, date, deduplication,
+  evidence and explicit-exclusion boundaries.
+- Fail the weekly run when both primary and fallback model routing cannot make
+  a valid selection instead of silently publishing a mechanical keyword list.
+- Add an auditable semantic-selection receipt with profile, evaluations,
+  portfolio rationale, model provenance and isolated candidate failures.
+
 ## 4.9.0 - 2026-10-05
 
 - Treat missing abstracts and incomplete per-paper analysis as quarantined
