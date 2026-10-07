@@ -16,6 +16,7 @@
 - Keep the report cover to six reader-facing selection metrics so audit-only
   counters cannot spill into a near-empty second page; normalize lightweight
   Markdown residue in repository abstracts before direct HTML/PDF display.
+- Keep each semantic selection-reason card atomic across PDF page boundaries.
 
 ## 4.9.0 - 2026-10-05
 

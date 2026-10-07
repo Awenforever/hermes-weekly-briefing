@@ -1734,7 +1734,7 @@ def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str,
       .method-step {{ display:grid; grid-template-columns:42mm 1fr; gap:3mm; background:#eef5f8; border-left:3px solid #0b7285; padding:3mm; border-radius:1.5mm; }}
       .method-step span {{ color:#40566d; }} .missing {{ color:#8a5b00; background:#fff7df; padding:3mm; }}
       .team,.author-grid {{ break-inside:auto; page-break-inside:auto; }}
-      .method-step,.author,table,tr {{ break-inside:avoid; page-break-inside:avoid; }}
+      .selection-reason,.method-step,.author,table,tr {{ break-inside:avoid; page-break-inside:avoid; }}
       table {{ width:100%; border-collapse:collapse; margin:2mm 0 4mm; font-size:8.5pt; }} th,td {{ border:1px solid #d5dee5; padding:2.5mm; vertical-align:top; }}
       th {{ background:#eef5f8; text-align:left; color:#234b70; }}
     </style></head><body>

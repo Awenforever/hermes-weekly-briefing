@@ -190,6 +190,7 @@ class ReportRendererTests(unittest.TestCase):
         self.assertNotIn("analysis_failures_isolated", html_text)
         self.assertIn("We introduce SmokeViz with portable annotations.", html_text)
         self.assertNotIn("**SmokeViz**", html_text)
+        self.assertIn(".selection-reason,.method-step,.author,table,tr { break-inside:avoid;", html_text)
 
     def test_source_labels_never_expose_cache_filenames(self):
         self.assertEqual(runner.source_label({"arxiv_id": "2307.00104", "source": "existing:w36_arxiv_raw.json"}), "arXiv")
