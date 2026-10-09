@@ -105,6 +105,19 @@ class ReportRendererTests(unittest.TestCase):
         self.assertTrue(body.startswith("你好："))
         self.assertTrue(body.rstrip().endswith("Hermes"))
 
+    def test_email_brief_prefers_snapshot_model_authored_identity(self):
+        body = runner.make_email_brief(
+            "2026-W41",
+            self.sample_papers(),
+            {"letter_style": {
+                "salutation": "在秋风里追问题的 Kelvin J.",
+                "signature": "替你在论文海里打捞火花的\n庄奕",
+            }},
+            {"recipient_salutation": "Kelvin J.", "sender_signature": "庄奕"},
+        )
+        self.assertTrue(body.startswith("在秋风里追问题的 Kelvin J.："))
+        self.assertTrue(body.rstrip().endswith("替你在论文海里打捞火花的\n庄奕"))
+
     def test_legacy_explicit_identity_is_resolved_before_defaults(self):
         delivery = runner.effective_email_delivery({
             "user": {"display_name": "Kelvin J."},

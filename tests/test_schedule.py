@@ -313,7 +313,8 @@ class ScheduleTests(unittest.TestCase):
             with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": False, "cli": "/bin/agently-cli", "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
                 state = plugin._setup_status()
                 self.assertEqual(["agently_login"], state["unresolved"])
-                self.assertIn("interactive", state["next_action"])
+                self.assertIn("mail-login-start", state["next_action"])
+                self.assertIn("verification_url", state["next_action"])
 
     def test_guided_setup_persists_every_personal_choice(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -347,7 +348,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual("王老师", config["delivery"]["recipient_salutation"])
             self.assertEqual("Hermes 研究助理", config["delivery"]["sender_signature"])
 
-    def test_existing_install_uses_portable_letter_identity_defaults(self):
+    def test_existing_install_uses_model_dynamic_letter_identity(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
             data = home / "plugin-data" / "hermes-weekly-briefing"
@@ -366,8 +367,10 @@ class ScheduleTests(unittest.TestCase):
                 state = plugin._setup_status()
             self.assertNotIn("personal_preferences", state["unresolved"])
             self.assertEqual([], state["personalization_errors"])
-            self.assertEqual("你好", state["personalization"]["recipient_salutation"])
-            self.assertEqual("Hermes", state["personalization"]["sender_signature"])
+            self.assertEqual("", state["personalization"]["recipient_salutation"])
+            self.assertEqual("", state["personalization"]["sender_signature"])
+            self.assertEqual("model_dynamic", state["personalization"]["recipient_salutation_source"])
+            self.assertEqual("model_dynamic", state["personalization"]["sender_signature_source"])
             self.assertTrue(state["personalization"]["customization_recommended"])
 
     def test_existing_explicit_legacy_identity_wins_over_defaults(self):
@@ -382,7 +385,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual("user.display_name", effective["recipient_salutation_source"])
         self.assertEqual("style.signature", effective["sender_signature_source"])
 
-    def test_new_setup_persists_defaults_when_personalization_is_omitted(self):
+    def test_new_setup_leaves_identity_to_the_model_when_personalization_is_omitted(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
             with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
@@ -395,8 +398,67 @@ class ScheduleTests(unittest.TestCase):
             config = __import__("json").loads(
                 (home / "plugin-data" / "hermes-weekly-briefing" / "config.json").read_text(encoding="utf-8")
             )
-            self.assertEqual("你好", config["delivery"]["recipient_salutation"])
-            self.assertEqual("Hermes", config["delivery"]["sender_signature"])
+            self.assertEqual("model_dynamic", config["delivery"]["letter_identity_mode"])
+            self.assertNotIn("recipient_salutation", config["delivery"])
+            self.assertNotIn("sender_signature", config["delivery"])
+
+    def test_login_url_parser_prefers_oauth_capability_link(self):
+        text = "docs https://example.com/help\n请登录 https://agent.qq.com/page/oauth?oauth_type=device&user_code=abc"
+        self.assertEqual(
+            "https://agent.qq.com/page/oauth?oauth_type=device&user_code=abc",
+            plugin._login_url(text),
+        )
+
+    def test_login_public_state_uses_hermes_media_contract_only_when_qr_exists(self):
+        with tempfile.TemporaryDirectory() as raw:
+            qr = Path(raw) / "login.png"
+            state = {"status": "pending", "verification_url": "https://agent.qq.com/oauth", "qr_path": str(qr)}
+            without = plugin._mail_login_public_state(state)
+            self.assertNotIn("media_directive", without)
+            qr.write_bytes(b"png")
+            with_qr = plugin._mail_login_public_state(state)
+            self.assertEqual(f"MEDIA:{qr}", with_qr["media_directive"])
+
+    def test_mail_login_start_returns_link_without_blocking_on_auth_completion(self):
+        with tempfile.TemporaryDirectory() as raw:
+            login_dir = Path(raw) / "mail-login"
+            process = mock.MagicMock()
+            process.pid = 4321
+            process.poll.return_value = None
+
+            def spawn(*_args, **_kwargs):
+                (login_dir / "agently.stderr.log").write_text(
+                    "请点击以下链接登录：\nhttps://agent.qq.com/page/oauth?oauth_type=device&user_code=abc\n",
+                    encoding="utf-8",
+                )
+                return process
+
+            mail = {"installed": True, "authenticated": False, "cli": "/bin/agently-cli"}
+            with mock.patch.object(plugin, "_mail_status", return_value=mail), mock.patch.object(
+                plugin, "_mail_login_dir", return_value=login_dir
+            ), mock.patch.object(
+                plugin, "_mail_login_state_path", return_value=login_dir / "state.json"
+            ), mock.patch.object(plugin, "_read_mail_login_state", return_value={}), mock.patch.object(
+                plugin, "_optional_login_qr", return_value=""
+            ), mock.patch.object(
+                plugin, "_agently_env", return_value={"AGENTLY_WORKSPACE": "hermes"}
+            ), mock.patch.object(plugin.subprocess, "Popen", side_effect=spawn):
+                code, result = plugin._start_mail_login(wait_seconds=0.5)
+            self.assertEqual(0, code)
+            self.assertEqual("pending", result["status"])
+            self.assertIn("user_code=abc", result["verification_url"])
+            self.assertTrue((login_dir / "state.json").is_file())
+
+    def test_mail_login_status_requires_real_identity_probe(self):
+        authenticated = {"installed": True, "authenticated": True, "workspace": "hermes"}
+        with tempfile.TemporaryDirectory() as raw, mock.patch.object(
+            plugin, "_mail_status", return_value=authenticated
+        ), mock.patch.object(
+            plugin, "_mail_login_state_path", return_value=Path(raw) / "state.json"
+        ), mock.patch.object(plugin, "_read_mail_login_state", return_value={}):
+            code, result = plugin._mail_login_status()
+        self.assertEqual(0, code)
+        self.assertEqual("authenticated", result["status"])
 
     def test_setup_requires_a_reachable_academic_search_engine(self):
         with tempfile.TemporaryDirectory() as raw:

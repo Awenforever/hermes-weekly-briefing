@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.2.0 - 2026-10-09
+
+- Restore model-authored, per-issue salutations and Hermes sign-offs without hardcoding a particular user's identity; configured base names are retained and decorated, while unconfigured installs receive safe Hermes-authored identities.
+- Persist the generated letter identity in each immutable report snapshot so rerenders are reproducible.
+- Add non-blocking Agently device-login commands that return a clickable authorization URL to terminals and Hermes message channels, with an optional adapter-neutral `MEDIA:` QR artifact.
+- Keep authentication ownership explicit: Weekly Briefing creates the authorization artifact, while Hermes platform adapters deliver it.
+
 ## 5.1.2 - 2026-10-09
 
 - Route historical snapshot rerenders through the same explicit, legacy and

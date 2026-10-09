@@ -1604,8 +1604,17 @@ def make_email_brief(
     """
     narrative = narrative if isinstance(narrative, dict) else {}
     delivery = delivery if isinstance(delivery, dict) else {}
-    salutation = str(delivery.get("recipient_salutation") or DEFAULT_RECIPIENT_SALUTATION).strip()
-    signature = str(delivery.get("sender_signature") or DEFAULT_SENDER_SIGNATURE).strip()
+    letter_style = narrative.get("letter_style") if isinstance(narrative.get("letter_style"), dict) else {}
+    salutation = str(
+        letter_style.get("salutation")
+        or delivery.get("recipient_salutation")
+        or DEFAULT_RECIPIENT_SALUTATION
+    ).strip().rstrip("：:")
+    signature = str(
+        letter_style.get("signature")
+        or delivery.get("sender_signature")
+        or DEFAULT_SENDER_SIGNATURE
+    ).strip()
 
     lines = [f"{salutation}：", "", f"这是我为你整理的 {week} 学术研究周报。"]
     rationale = sentence_excerpt(
@@ -2489,6 +2498,11 @@ def main() -> int:
         narrative = analysis_payload.get("narrative") if isinstance(analysis_payload, dict) and isinstance(analysis_payload.get("narrative"), dict) else {}
         if semantic_receipt.get("editorial_rationale") and not narrative.get("editorial_rationale"):
             narrative["editorial_rationale"] = semantic_receipt["editorial_rationale"]
+        if isinstance(semantic_receipt.get("letter_style"), dict):
+            # Persist the exact model-authored identity with the immutable
+            # snapshot. Re-renders must reproduce the original letter instead
+            # of asking a model for a new salutation or sign-off.
+            narrative["letter_style"] = semantic_receipt["letter_style"]
         write_json(outdir / "selected_snapshot.json", {
             "version": 1,
             "runner": MARKER,

@@ -11,6 +11,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -142,7 +143,9 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     actions.add_parser("search-status", help="Probe configured academic discovery engines")
     install_mail = actions.add_parser("mail-install", help="Install the supported Agently mail CLI")
     install_mail.add_argument("--yes", action="store_true", help="Confirm the global npm installation")
-    actions.add_parser("mail-login", help="Open Agently's interactive login flow")
+    actions.add_parser("mail-login", help="Start Agently login and return a portable authorization link")
+    actions.add_parser("mail-login-start", help="Start Agently login for a terminal or Hermes message channel")
+    actions.add_parser("mail-login-status", help="Check a previously started Agently login")
     run = actions.add_parser("run", help="Generate a report and optionally send it by email")
     run.add_argument("--email-to", action="append", default=[])
     run.add_argument("--send-email", action="store_true")
@@ -284,6 +287,13 @@ def _effective_personalization(config: dict) -> dict[str, str]:
     style = config.get("style") if isinstance(config.get("style"), dict) else {}
     salutation_source = "delivery.recipient_salutation"
     signature_source = "delivery.sender_signature"
+    if (
+        not str(delivery.get("letter_identity_mode") or "").strip()
+        and recipient_salutation == DEFAULT_RECIPIENT_SALUTATION
+        and sender_signature == DEFAULT_SENDER_SIGNATURE
+    ):
+        recipient_salutation = ""
+        sender_signature = ""
     if not recipient_salutation:
         recipient_salutation = usable(user.get("display_name"))
         salutation_source = "user.display_name" if recipient_salutation else "default"
@@ -291,9 +301,9 @@ def _effective_personalization(config: dict) -> dict[str, str]:
         sender_signature = usable(style.get("signature"))
         signature_source = "style.signature" if sender_signature else "default"
     if not recipient_salutation:
-        recipient_salutation = DEFAULT_RECIPIENT_SALUTATION
+        salutation_source = "model_dynamic"
     if not sender_signature:
-        sender_signature = DEFAULT_SENDER_SIGNATURE
+        signature_source = "model_dynamic"
     return {
         "recipient_salutation": recipient_salutation,
         "sender_signature": sender_signature,
@@ -654,6 +664,208 @@ def _mail_status(probe: bool = True) -> dict:
     return result
 
 
+def _mail_login_dir() -> Path:
+    return _data() / "mail-login"
+
+
+def _mail_login_state_path() -> Path:
+    return _mail_login_dir() / "state.json"
+
+
+def _write_private_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".new")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        os.chmod(temporary, 0o600)
+    except OSError:
+        pass
+    os.replace(temporary, path)
+
+
+def _read_mail_login_state() -> dict:
+    path = _mail_login_state_path()
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _login_url(text: str) -> str:
+    matches = re.findall(r"https://[^\s<>\"']+", str(text or ""))
+    return next((value.rstrip(".,，。)）]") for value in matches if "oauth" in value.casefold()), "")
+
+
+def _process_alive(pid: object) -> bool:
+    try:
+        value = int(pid)
+        if value <= 0:
+            return False
+        os.kill(value, 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _optional_login_qr(url: str) -> str:
+    """Create a QR when the optional plugin runtime supports it.
+
+    A clickable URL remains the canonical cross-channel contract; failure to
+    render a QR never blocks authentication.
+    """
+    runtime = _runtime_path()
+    if runtime.is_dir() and str(runtime) not in sys.path:
+        sys.path.insert(0, str(runtime))
+    try:
+        import qrcode
+
+        path = _mail_login_dir() / "authorization.png"
+        image = qrcode.make(url)
+        image.save(path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return str(path.resolve())
+    except Exception:
+        return ""
+
+
+def _mail_login_public_state(state: dict) -> dict:
+    result = {
+        "installed": True,
+        "authenticated": False,
+        "status": str(state.get("status") or "pending"),
+        "verification_url": str(state.get("verification_url") or ""),
+        "started_at": str(state.get("started_at") or ""),
+        "expires_at": str(state.get("expires_at") or ""),
+        "next_action": "Open verification_url, finish authorization, then run mail-login-status.",
+    }
+    qr_path = str(state.get("qr_path") or "")
+    if qr_path and Path(qr_path).is_file():
+        result["qr_path"] = qr_path
+        result["media_directive"] = f"MEDIA:{qr_path}"
+    return result
+
+
+def _mail_login_expired(state: dict) -> bool:
+    try:
+        return datetime.now(timezone.utc) >= datetime.fromisoformat(
+            str(state.get("expires_at") or "")
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _start_mail_login(wait_seconds: float = 12.0) -> tuple[int, dict]:
+    current = _mail_status()
+    if not current.get("installed"):
+        return 2, {
+            **current,
+            "status": "missing_cli",
+            "next_action": "Run mail-install --yes first.",
+        }
+    if current.get("authenticated"):
+        return 0, {**current, "status": "authenticated", "next_action": "No login is needed."}
+
+    existing = _read_mail_login_state()
+    if (
+        existing.get("status") == "pending"
+        and existing.get("verification_url")
+        and not _mail_login_expired(existing)
+        and _process_alive(existing.get("pid"))
+    ):
+        return 0, _mail_login_public_state(existing)
+
+    login_dir = _mail_login_dir()
+    login_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = login_dir / "agently.stdout.log"
+    stderr_path = login_dir / "agently.stderr.log"
+    for path in (stdout_path, stderr_path):
+        path.write_text("", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    cli = str(current["cli"])
+    popen_kwargs: dict = {
+        "env": _agently_env(),
+        "stdin": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+    with stdout_path.open("a", encoding="utf-8") as stdout, stderr_path.open("a", encoding="utf-8") as stderr:
+        process = subprocess.Popen(
+            _portable_command(cli, "auth", "login", "--verbose"),
+            stdout=stdout,
+            stderr=stderr,
+            **popen_kwargs,
+        )
+
+    deadline = time.monotonic() + max(0.5, float(wait_seconds))
+    url = ""
+    while time.monotonic() < deadline:
+        combined = stdout_path.read_text(encoding="utf-8", errors="replace") + "\n" + stderr_path.read_text(encoding="utf-8", errors="replace")
+        url = _login_url(combined)
+        if url or process.poll() is not None:
+            break
+        time.sleep(0.1)
+    if not url:
+        diagnostic = (stderr_path.read_text(encoding="utf-8", errors="replace") or stdout_path.read_text(encoding="utf-8", errors="replace"))[-600:]
+        state = {
+            "status": "failed" if process.poll() is not None else "link_unavailable",
+            "pid": process.pid,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "diagnostic": diagnostic,
+        }
+        _write_private_json(_mail_login_state_path(), state)
+        return 2, {
+            "installed": True,
+            "authenticated": False,
+            "status": state["status"],
+            "diagnostic": diagnostic,
+            "next_action": "Retry mail-login-start in an interactive terminal.",
+        }
+
+    now = datetime.now(timezone.utc)
+    state = {
+        "status": "pending",
+        "pid": process.pid,
+        "started_at": now.isoformat(),
+        "expires_at": datetime.fromtimestamp(now.timestamp() + 900, timezone.utc).isoformat(),
+        "verification_url": url,
+        "qr_path": _optional_login_qr(url),
+    }
+    _write_private_json(_mail_login_state_path(), state)
+    return 0, _mail_login_public_state(state)
+
+
+def _mail_login_status() -> tuple[int, dict]:
+    status = _mail_status()
+    if status.get("authenticated"):
+        state = _read_mail_login_state()
+        if state:
+            state = {"status": "authenticated", "completed_at": datetime.now(timezone.utc).isoformat()}
+            _write_private_json(_mail_login_state_path(), state)
+        return 0, {**status, "status": "authenticated", "next_action": "Run doctor to continue setup."}
+    state = _read_mail_login_state()
+    if not state:
+        return 2, {**status, "status": "not_started", "next_action": "Run mail-login-start."}
+    if _mail_login_expired(state):
+        return 2, {**status, "status": "expired", "next_action": "Run mail-login-start for a new link."}
+    if not _process_alive(state.get("pid")):
+        return 2, {**status, "status": "failed", "next_action": "Run mail-login-start to retry."}
+    return 2, _mail_login_public_state(state)
+
+
 def _model_status(config: dict) -> dict:
     try:
         scripts = _root() / "research" / "weekly-briefing-v2" / "scripts"
@@ -846,7 +1058,7 @@ def _setup_status() -> dict:
             if "personal_preferences" in unresolved else
             "ask permission, then run mail-install --yes"
             if "agently_install" in unresolved else
-            "run mail-login in the user's interactive terminal and wait for completion"
+            "run mail-login-start, present verification_url (and media_directive when present) through the current Hermes channel, then poll mail-login-status"
             if "agently_login" in unresolved else
             search["next_action"]
             if "academic_search" in unresolved else
@@ -857,7 +1069,7 @@ def _setup_status() -> dict:
         "personalization": {
             **_effective_personalization(config),
             "customization_recommended": any(
-                value == "default" for value in (
+                value == "model_dynamic" for value in (
                     _effective_personalization(config)["recipient_salutation_source"],
                     _effective_personalization(config)["sender_signature_source"],
                 )
@@ -889,8 +1101,10 @@ def _configure(args: argparse.Namespace) -> int:
         delivery["email_to"] = [str(value).strip() for value in args.email_to if "@" in str(value)]
     if getattr(args, "recipient_salutation", None) is not None:
         delivery["recipient_salutation"] = str(args.recipient_salutation).strip()
+        delivery["letter_identity_mode"] = "model_dynamic"
     if getattr(args, "sender_signature", None) is not None:
         delivery["sender_signature"] = str(args.sender_signature).strip()
+        delivery["letter_identity_mode"] = "model_dynamic"
     if args.keyword:
         research["core_keywords"] = [str(value).strip() for value in args.keyword if str(value).strip()]
     if getattr(args, "direction_term", None):
@@ -985,13 +1199,13 @@ def _initialize(
         else:
             clean_emails = [str(value).strip() for value in email_to if "@" in str(value) and "$" not in str(value)]
             clean_keywords = [str(value).strip() for value in keywords if str(value).strip() and "$" not in str(value)]
-            clean_salutation = str(recipient_salutation or DEFAULT_RECIPIENT_SALUTATION).strip()
-            clean_signature = str(sender_signature or DEFAULT_SENDER_SIGNATURE).strip()
+            clean_salutation = str(recipient_salutation or "").strip()
+            clean_signature = str(sender_signature or "").strip()
             if not clean_emails or not clean_keywords:
                 if emit:
                     print(
                         "new setup requires --email-to and at least one --keyword; "
-                        "salutation and sign-off use editable defaults when omitted",
+                        "salutation and sign-off are model-generated when omitted",
                         file=sys.stderr,
                     )
                 return 2
@@ -1013,11 +1227,14 @@ def _initialize(
                 "delivery": {
                     "channel": "email",
                     "email_to": clean_emails,
-                    "recipient_salutation": clean_salutation,
-                    "sender_signature": clean_signature,
+                    "letter_identity_mode": "model_dynamic",
                 },
                 "schedule": {"expression": "0 2 * * 5", "timezone": _profile_timezone()},
             }
+            if clean_salutation:
+                config["delivery"]["recipient_salutation"] = clean_salutation
+            if clean_signature:
+                config["delivery"]["sender_signature"] = clean_signature
             _write_config(config)
     current_config = _load_config()
     errors = _config_diagnostics() + (_personalization_errors(current_config) if current_config else [])
@@ -1139,12 +1356,14 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
             return 2
         result = subprocess.run(_portable_command(npm, "install", "--global", "@tencent-qqmail/agently-cli"))
         return result.returncode
-    if action == "mail-login":
-        cli = _find_agently_cli()
-        if not cli:
-            print("Agently CLI is not installed; run mail-install --yes first", file=sys.stderr)
-            return 2
-        return subprocess.run(_portable_command(cli, "auth", "login"), env=_agently_env()).returncode
+    if action in {"mail-login", "mail-login-start"}:
+        code, result = _start_mail_login()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return code
+    if action == "mail-login-status":
+        code, result = _mail_login_status()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return code
     if action == "schedule-install":
         return _install_schedule(args.schedule)
     if action == "schedule-status":

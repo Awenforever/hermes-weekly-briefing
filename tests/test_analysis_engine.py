@@ -37,6 +37,10 @@ def _record(problem="问题"):
     }
 
 
+def _letter_style(recipient="本周与新想法相遇的读者", sender="在论文间拾光的 Hermes"):
+    return {"salutation": recipient, "signature": sender}
+
+
 class AnalysisEngineTests(unittest.TestCase):
     def test_resolver_prefers_complete_case_insensitive_provider(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -171,6 +175,7 @@ class AnalysisEngineTests(unittest.TestCase):
                     "selected_ids": ["paper:b"],
                     "reserve_ids": ["paper:a"],
                     "editorial_rationale": "B 更贴近核心问题，A 保留作方法扩展。",
+                    "letter_style": _letter_style(),
                 }
             return {"content": json.dumps(payload, ensure_ascii=False)}
         papers = [
@@ -217,7 +222,7 @@ class AnalysisEngineTests(unittest.TestCase):
                     } for item in request["candidates"]
                 }}
             else:
-                payload = {"selected_ids": ["paper:a"], "reserve_ids": ["paper:b"]}
+                payload = {"selected_ids": ["paper:a"], "reserve_ids": ["paper:b"], "letter_style": _letter_style()}
             return {"content": json.dumps(payload, ensure_ascii=False)}
         config = {"analysis": {
             "selection_attempts": 2, "selection_retry_delays_seconds": [0]
@@ -266,7 +271,7 @@ class AnalysisEngineTests(unittest.TestCase):
             request = json.loads(kwargs["messages"][1]["content"])
             calls.append(request)
             if "逐篇" not in request["task"]:
-                return {"content": json.dumps({"selected_ids": ["paper:a"], "reserve_ids": ["paper:b"]})}
+                return {"content": json.dumps({"selected_ids": ["paper:a"], "reserve_ids": ["paper:b"], "letter_style": _letter_style()})}
             ids = [item["id"] for item in request["candidates"]]
             records = {"paper:a": evaluation("paper:a")} if len(ids) > 1 else {ids[0]: evaluation(ids[0])}
             return {"content": json.dumps({"evaluations": records}, ensure_ascii=False)}
@@ -279,6 +284,44 @@ class AnalysisEngineTests(unittest.TestCase):
         self.assertEqual(3, len(calls))
         self.assertEqual(["paper:b"], [item["id"] for item in calls[1]["candidates"]])
         self.assertEqual(["paper:a", "paper:b"], [item["canonical_id"] for item in ordered])
+
+    def test_portfolio_generates_dynamic_letter_identity_and_keeps_configured_bases(self):
+        captured = {}
+        def call(**kwargs):
+            request = json.loads(kwargs["messages"][1]["content"])
+            if "逐篇" in request["task"]:
+                payload = {"evaluations": {item["id"]: {
+                    "classification": "core", "overall_score": 90,
+                    "reason": "语义相关", "profile_connections": ["主题"],
+                } for item in request["candidates"]}}
+            else:
+                captured.update(request["letter_identity"])
+                payload = {
+                    "selected_ids": ["paper:a"], "reserve_ids": [],
+                    "editorial_rationale": "值得读",
+                    "letter_style": _letter_style("在秋风里读论文的 Kelvin J.", "替你捞论文的庄奕"),
+                }
+            return {"content": json.dumps(payload, ensure_ascii=False)}
+        config = {"delivery": {
+            "recipient_salutation": "Kelvin J.", "sender_signature": "庄奕",
+            "letter_identity_mode": "model_dynamic",
+        }}
+        with _router(call):
+            _, receipt, _ = engine.select_papers_semantically(
+                [{"canonical_id": "paper:a", "title": "A", "abstract": "Evidence"}],
+                {}, config, Path("."), 1,
+            )
+        self.assertEqual("Kelvin J.", captured["recipient_base"])
+        self.assertEqual("庄奕", captured["sender_base"])
+        self.assertIn("Kelvin J.", receipt["letter_style"]["salutation"])
+        self.assertIn("庄奕", receipt["letter_style"]["signature"])
+
+    def test_legacy_temporary_defaults_are_treated_as_unconfigured(self):
+        request = engine._letter_identity_request({"delivery": {
+            "recipient_salutation": "你好", "sender_signature": "Hermes",
+        }})
+        self.assertEqual("", request["recipient_base"])
+        self.assertEqual("", request["sender_base"])
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 3. 检查分析模型、PDF 渲染器与 Agently 邮件工具；
 4. 实测所选学术搜索源，并说明开放来源与需要凭据的可选来源；
 5. 如缺少 Agently，在征得同意后安装；
-6. 打开 Agently 的交互式登录流程，由你在终端或浏览器中完成授权；
+6. 生成 Agently 授权链接并直接发回当前终端或 Hermes 对话渠道；可生成二维码时一并发送，由 Hermes 的微信、飞书等平台适配器负责实际展示；
 7. 验证登录状态，生成一份测试周报；
 8. 经你确认后再安装每周计划任务。
 
@@ -50,7 +50,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 - 可选的研究概念组与排除项；默认由模型理解其语义，只有你明确选择严格模式时才作 Boolean 硬约束；
 - 每期论文数量（默认 5 篇）；
 - 收件邮箱；
-- 邮件正文中对你的称呼，以及结尾使用的 Hermes 署名；未定制时分别使用“你好”和“Hermes”，以后可随时修改；
+- 可选的称呼基名与 Hermes 署名基名；配置后模型每期保留基名并添加不同的有趣修饰，未配置时则由模型生成完整称呼和 Hermes 风格署名；
 - 每周发送时间与时区；
 - 可选的分析模型与备用模型（留空时动态继承 Hermes）；
 - 学术搜索源；开放来源默认开箱即用，凭据型来源只引用 Hermes 环境中的变量；
@@ -62,7 +62,7 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 
 ## 报告长什么样
 
-每次邮件包含两个职责不同的成品：邮件正文是一封简洁、拟人化的导读信，告诉你本期为什么值得读、时间有限时先看什么，并使用你设置的称呼和 Hermes 署名；附件 `report.pdf` 才是完整报告。插件不会再把 PDF 的 Markdown 正文原样复制进邮件。未完成个性化时会使用“你好”与“Hermes”作为安全默认值，但安装引导仍会邀请你定制。
+每次邮件包含两个职责不同的成品：邮件正文是一封简洁、拟人化的导读信，告诉你本期为什么值得读、时间有限时先看什么；附件 `report.pdf` 才是完整报告。称呼和署名由本期选稿模型结合论文主题与时间氛围创作：你设置的基名会原样保留，没设置时模型会生成完整称呼与 Hermes 风格署名。这个结果会随当期快照保存，重新排版不会把它换掉。插件不会把 PDF 的 Markdown 正文原样复制进邮件。
 
 每篇入选论文都会尽可能包含：
 
@@ -209,10 +209,11 @@ Agently 邮件工具由插件显式管理：
 ```bash
 hermes weekly-briefing mail-status
 hermes weekly-briefing mail-install --yes
-hermes weekly-briefing mail-login
+hermes weekly-briefing mail-login-start
+hermes weekly-briefing mail-login-status
 ```
 
-`mail-login` 是交互步骤，可能打开浏览器或要求在当前终端确认。插件不会伪造登录成功；只有身份检查真实通过，计划任务才允许安装。身份、登录和发送固定使用 Hermes 的持久化 Agently 工作区：`mail-status` 已通过时不会重复要求登录。
+`mail-login-start` 会快速返回可点击的授权链接，不会把 Hermes 对话卡在一个长期等待的子进程上。若隔离运行时支持二维码，还会返回 `MEDIA:` 图片契约；Weekly Briefing 只负责生成链接/图片，微信、飞书或其他渠道如何展示由 Hermes 自己的适配器负责。二维码不可用时链接仍可完成登录。插件不会伪造登录成功；只有 `mail-login-status` 的真实身份检查通过，计划任务才允许安装。身份、登录和发送固定使用 Hermes 的持久化 Agently 工作区：`mail-status` 已通过时不会重复要求登录。
 
 PDF 渲染依赖保存在当前 Hermes profile 的 `plugin-data/hermes-weekly-briefing/runtime/`，不会写入或污染 Hermes 核心 Python 环境；升级 Hermes 后也不会被核心依赖同步清除。
 

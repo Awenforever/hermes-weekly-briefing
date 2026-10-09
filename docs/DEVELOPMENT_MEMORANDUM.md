@@ -7,18 +7,19 @@ must not become an incident log.
 
 The email body is not a transport copy of `report.md`. It is a concise,
 human-facing editorial letter built from the model-owned portfolio rationale
-and grounded per-paper analysis. It must use the user's configured form of
-address, close with the configured Hermes sign-off, suggest
+and grounded per-paper analysis. It must use the validated per-issue model
+identity (anchored to any user-configured names), suggest
 where to start, and point to the attached `report.pdf` for full detail.
 
 The PDF remains the complete report with pipeline-independent reader content,
 paper analyses, method chains, evidence comparisons and team context. Keep a
 separate `email_body.md` artifact and quality contract. Any code path—including
 snapshot rerendering—must pass `email_body.md`, never `report.md`, to the mail
-transport. Resolve identity in this order: explicit delivery fields, explicit
-legacy `user.display_name` / `style.signature`, then the portable defaults
-`你好` / `Hermes`. Setup must still offer customization. Never infer either
-value from an email address, account name, prior report or developer fixture.
+transport. Explicit delivery fields and legacy `user.display_name` /
+`style.signature` are model anchors, not fixed full lines. With no anchors the
+portfolio model generates the complete identity. `你好` / `Hermes` are only
+legacy-snapshot emergency fallbacks. Never infer identity from an email
+address, account name, prior report or developer fixture.
 
 ## Public distribution must contain no author research profile
 
@@ -120,6 +121,22 @@ The default pipeline must therefore preserve this order:
 The evaluation must distinguish core, adjacent, exploratory and rejected work,
 and explain semantic or methodological connections using the supplied abstract.
 The portfolio pass, not a lexical score or source quota, owns `selected_ids`.
+
+## Dynamic letter identity contract
+
+- The same portfolio-model pass that owns the final paper combination also owns `letter_style.salutation` and `letter_style.signature`; this is a semantic editorial decision, not a renderer template.
+- User-configured recipient/signature bases are immutable anchors. The model may decorate them but validation rejects outputs that omit them. With no bases, the model creates a full salutation and a clearly Hermes-authored signature without guessing the user's real identity.
+- Calendar metadata and selected-paper context may inspire wording. Unverified current events are never supplied or invented merely to sound topical.
+- The validated result is copied into `selected_snapshot.json`. Snapshot rerenders must reuse it byte-for-byte and never call a model again.
+- `你好` / `Hermes` remain emergency compatibility fallbacks for legacy snapshots only. The exact pair persisted by 5.1.1/5.1.2 is migrated semantically as “unconfigured,” not treated as deliberate personalization.
+
+## Agently authentication boundary
+
+- Weekly Briefing owns starting the OAuth device flow, extracting its authorization URL, optionally rendering a short-lived QR image, persisting bounded login state, and verifying the final Agently identity.
+- Hermes owns presentation. The CLI returns `verification_url` for every channel and optionally `media_directive=MEDIA:/absolute/path.png`; the active Hermes adapter decides how links and images appear on WeChat, Feishu, terminal, or another built-in platform.
+- QR generation is optional and must never block login. The clickable authorization URL is the portable canonical path.
+- A started login must not block an agent tool call. `mail-login-start` returns promptly and `mail-login-status` performs the authoritative completion check in the same persistent Agently workspace used for sending.
+- OAuth URLs, QR files, and logs live under plugin-data with private permissions and must not be committed, copied into README examples, or confused with credentials.
 If primary and fallback model routing both fail, publication fails closed; never
 silently substitute deterministic keyword ranking.
 
