@@ -114,6 +114,16 @@ class ReportRendererTests(unittest.TestCase):
         self.assertEqual("Kelvin J.", delivery["recipient_salutation"])
         self.assertEqual("庄奕", delivery["sender_signature"])
 
+    def test_snapshot_rerender_uses_the_same_identity_resolution(self):
+        source = (
+            ROOT
+            / "research"
+            / "weekly-briefing-v2"
+            / "scripts"
+            / "rerender_weekly_snapshot.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("delivery = runner.effective_email_delivery(config)", source)
+
     def test_fixed_focus_does_not_consume_profile_by_default(self):
         queries = runner.build_queries(
             {"research": {"core_keywords": ["quantum error correction"]}},

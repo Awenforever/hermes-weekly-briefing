@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.1.2 - 2026-10-09
+
+- Route historical snapshot rerenders through the same explicit, legacy and
+  default letter-identity resolver as normal weekly generation.
+
 ## 5.1.1 - 2026-10-09
 
 - Keep salutation and Hermes sign-off customization in onboarding while making

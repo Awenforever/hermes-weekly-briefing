@@ -50,7 +50,7 @@ def main() -> int:
         raise RuntimeError("only successful non-empty reports can be rebuilt")
 
     config = read_json(data_dir / "config.json")
-    delivery = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
+    delivery = runner.effective_email_delivery(config)
     os.environ.setdefault("AGENTLY_WORKSPACE", str(delivery.get("agently_workspace") or "hermes"))
     with tempfile.TemporaryDirectory(prefix="rerender-", dir=str(report_dir.parent)) as raw_stage:
         stage = Path(raw_stage)
