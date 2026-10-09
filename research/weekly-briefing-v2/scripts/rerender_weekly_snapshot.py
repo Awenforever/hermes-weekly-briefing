@@ -56,9 +56,14 @@ def main() -> int:
         stage = Path(raw_stage)
         markdown = runner.make_report(args.week, selected, stats, stage, queries, narrative)
         markdown_path = stage / "report.md"
+        email_body_path = stage / "email_body.md"
         html_path = stage / "report.html"
         pdf_path = stage / "report.pdf"
         markdown_path.write_text(markdown, encoding="utf-8")
+        email_body_path.write_text(
+            runner.make_email_brief(args.week, selected, narrative, delivery),
+            encoding="utf-8",
+        )
         html_text = runner.make_report_html(args.week, selected, stats, queries, html_path, narrative)
         quality = runner.validate_report_quality(selected, html_text)
         runner.make_pdf(html_text, markdown, pdf_path)
@@ -69,18 +74,18 @@ def main() -> int:
 
         recipients = [str(value) for value in delivery.get("email_to", []) if str(value).strip()]
         subject = f"⚚ 学术研究周报 {args.week}（排版修正版）"
-        email = runner.try_send_email(recipients, subject, markdown_path, pdf_path, bool(args.send_email and recipients))
+        email = runner.try_send_email(recipients, subject, email_body_path, pdf_path, bool(args.send_email and recipients))
         if args.send_email and email.get("status") != "sent":
             raise RuntimeError("corrected report email was not sent")
 
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         backup = data_dir / "rerender-backups" / args.week / stamp
         backup.mkdir(parents=True, exist_ok=False)
-        for name in ("report.md", "report.html", "report.pdf", "quality_receipt.json", "delivery_receipt.json", "manifest.json"):
+        for name in ("report.md", "report.html", "report.pdf", "email_body.md", "quality_receipt.json", "delivery_receipt.json", "manifest.json"):
             source = report_dir / name
             if source.is_file():
                 shutil.copy2(source, backup / name)
-        for name in ("report.md", "report.html", "report.pdf"):
+        for name in ("report.md", "report.html", "report.pdf", "email_body.md"):
             os.replace(stage / name, report_dir / name)
         write_json(report_dir / "quality_receipt.json", quality)
         receipt = {

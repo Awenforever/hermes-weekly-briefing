@@ -3,6 +3,22 @@
 Internal engineering constraints. Product README files must stay concise and
 must not become an incident log.
 
+## Email letter and PDF are separate publication products
+
+The email body is not a transport copy of `report.md`. It is a concise,
+human-facing editorial letter built from the model-owned portfolio rationale
+and grounded per-paper analysis. It must use the user's explicitly configured
+form of address, close with the explicitly configured Hermes sign-off, suggest
+where to start, and point to the attached `report.pdf` for full detail.
+
+The PDF remains the complete report with pipeline-independent reader content,
+paper analyses, method chains, evidence comparisons and team context. Keep a
+separate `email_body.md` artifact and quality contract. Any code path—including
+snapshot rerendering—must pass `email_body.md`, never `report.md`, to the mail
+transport. Missing salutation or sign-off leaves setup unresolved and blocks
+scheduled delivery; never infer either value from an email address, account
+name, prior report or developer fixture.
+
 ## Public distribution must contain no author research profile
 
 The plugin previously mixed a production user's wildfire/smoke research terms

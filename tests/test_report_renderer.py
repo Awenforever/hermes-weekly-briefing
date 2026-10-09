@@ -80,6 +80,32 @@ class ReportRendererTests(unittest.TestCase):
             },
         ]
 
+    def test_email_brief_is_a_personal_letter_not_the_report_body(self):
+        papers = self.sample_papers()
+        body = runner.make_email_brief(
+            "2026-W41",
+            papers,
+            {
+                "editorial_rationale": "这两篇论文把可复现评测与跨设备校准连成了一条方法链。",
+                "next_week": ["不同噪声模型之间的结论能否稳定迁移？"],
+            },
+            {"recipient_salutation": "王老师", "sender_signature": "Hermes 研究助理"},
+        )
+        self.assertTrue(body.startswith("王老师："))
+        self.assertIn("如果时间有限", body)
+        self.assertIn("report.pdf", body)
+        self.assertTrue(body.rstrip().endswith("Hermes 研究助理"))
+        self.assertNotIn("## 流水线统计", body)
+        self.assertNotIn("## 入选论文", body)
+        report = runner.make_report("2026-W41", papers, {}, Path("."), [], {})
+        self.assertNotEqual(report, body)
+
+    def test_email_brief_refuses_missing_salutation_or_signature(self):
+        with self.assertRaisesRegex(RuntimeError, "personalization is incomplete"):
+            runner.make_email_brief(
+                "2026-W41", self.sample_papers(), {}, {"recipient_salutation": "王老师"}
+            )
+
     def test_fixed_focus_does_not_consume_profile_by_default(self):
         queries = runner.build_queries(
             {"research": {"core_keywords": ["quantum error correction"]}},

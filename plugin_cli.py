@@ -79,6 +79,8 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     actions.add_parser("status", help="Show data, configuration, and last-report status")
     setup = actions.add_parser("setup", help="Inspect or apply guided personal setup")
     setup.add_argument("--email-to", action="append", default=[])
+    setup.add_argument("--recipient-salutation", default=None)
+    setup.add_argument("--sender-signature", default=None)
     setup.add_argument("--keyword", action="append", default=[])
     setup.add_argument("--direction-term", action="append", default=[])
     setup.add_argument(
@@ -128,6 +130,8 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     init = actions.add_parser("init", help="Initialize configuration or migrate legacy Weekly Briefing data")
     init.add_argument("--email-to", action="append", default=[])
     init.add_argument("--keyword", action="append", default=[])
+    init.add_argument("--recipient-salutation", default=None)
+    init.add_argument("--sender-signature", default=None)
     actions.add_parser("doctor", help="Validate configuration and delivery readiness")
     runtime = actions.add_parser("runtime-install", help="Install the declared PDF runtime dependencies")
     runtime.add_argument("--yes", action="store_true", help="Confirm installation into the active Hermes Python")
@@ -262,6 +266,18 @@ def _config_diagnostics() -> list[str]:
             minimum_any = -1
         if minimum_any < 0 or minimum_any > len([term for term in any_terms if str(term).strip()]):
             errors.append("research.relevance.minimum_any must be between zero and the any-term count")
+    return errors
+
+
+def _personalization_errors(config: dict) -> list[str]:
+    delivery = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
+    errors = []
+    recipient_salutation = str(delivery.get("recipient_salutation") or "").strip()
+    if not recipient_salutation or "$" in recipient_salutation:
+        errors.append("delivery.recipient_salutation needs the user's preferred form of address")
+    sender_signature = str(delivery.get("sender_signature") or "").strip()
+    if not sender_signature or "$" in sender_signature:
+        errors.append("delivery.sender_signature needs the preferred Hermes sign-off")
     return errors
 
 
@@ -734,7 +750,7 @@ def _profile_timezone() -> str:
 
 def _doctor_result() -> dict:
     config = _load_config()
-    errors = _config_diagnostics()
+    errors = _config_diagnostics() + (_personalization_errors(config) if config else [])
     mail = _mail_status()
     model = _model_status(config) if config else {"ready": False, "diagnostic": "configuration missing"}
     renderer = _renderer_status()
@@ -770,6 +786,7 @@ def _doctor_result() -> dict:
 def _setup_status() -> dict:
     config = _load_config()
     config_errors = _config_diagnostics()
+    personalization_errors = _personalization_errors(config) if config else []
     mail = _mail_status()
     search = _search_status(config) if config else {
         "ok": False,
@@ -779,7 +796,7 @@ def _setup_status() -> dict:
         "next_action": "configure at least one supported academic discovery engine",
     }
     unresolved = []
-    if config_errors:
+    if config_errors or personalization_errors:
         unresolved.append("personal_preferences")
     if not mail["installed"]:
         unresolved.append("agently_install")
@@ -794,7 +811,7 @@ def _setup_status() -> dict:
         "mail": mail,
         "academic_search": search,
         "next_action": (
-            "ask the user for research topics, recipient, schedule/timezone and optional model preferences"
+            "ask the user for research topics, recipient email, preferred form of address, Hermes sign-off, schedule/timezone and optional model preferences"
             if "personal_preferences" in unresolved else
             "ask permission, then run mail-install --yes"
             if "agently_install" in unresolved else
@@ -805,6 +822,7 @@ def _setup_status() -> dict:
             "run doctor, then offer a manual report test before installing the schedule"
         ),
         "privacy": "Never ask the user to paste a mail password, token, cookie, or OAuth code into chat.",
+        "personalization_errors": personalization_errors,
         "config": config,
     }
 
@@ -812,7 +830,13 @@ def _setup_status() -> dict:
 def _configure(args: argparse.Namespace) -> int:
     config = _load_config()
     if not config:
-        initialized = _initialize(args.email_to, args.keyword, emit=False)
+        initialized = _initialize(
+            args.email_to,
+            args.keyword,
+            getattr(args, "recipient_salutation", None),
+            getattr(args, "sender_signature", None),
+            emit=False,
+        )
         config = _load_config()
         if initialized and not config:
             return initialized
@@ -823,6 +847,10 @@ def _configure(args: argparse.Namespace) -> int:
     search = config.setdefault("search", {})
     if args.email_to:
         delivery["email_to"] = [str(value).strip() for value in args.email_to if "@" in str(value)]
+    if getattr(args, "recipient_salutation", None) is not None:
+        delivery["recipient_salutation"] = str(args.recipient_salutation).strip()
+    if getattr(args, "sender_signature", None) is not None:
+        delivery["sender_signature"] = str(args.sender_signature).strip()
     if args.keyword:
         research["core_keywords"] = [str(value).strip() for value in args.keyword if str(value).strip()]
     if getattr(args, "direction_term", None):
@@ -898,7 +926,13 @@ def _configure(args: argparse.Namespace) -> int:
     return 0 if not _config_diagnostics() else 2
 
 
-def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> int:
+def _initialize(
+    email_to: list[str],
+    keywords: list[str],
+    recipient_salutation: str | None = None,
+    sender_signature: str | None = None,
+    emit: bool = True,
+) -> int:
     data = _data()
     config_path = data / "config.json"
     migrated_from = None
@@ -911,9 +945,15 @@ def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> 
         else:
             clean_emails = [str(value).strip() for value in email_to if "@" in str(value) and "$" not in str(value)]
             clean_keywords = [str(value).strip() for value in keywords if str(value).strip() and "$" not in str(value)]
-            if not clean_emails or not clean_keywords:
+            clean_salutation = str(recipient_salutation or "").strip()
+            clean_signature = str(sender_signature or "").strip()
+            if not clean_emails or not clean_keywords or not clean_salutation or not clean_signature:
                 if emit:
-                    print("new setup requires --email-to and at least one --keyword", file=sys.stderr)
+                    print(
+                        "new setup requires --email-to, at least one --keyword, "
+                        "--recipient-salutation and --sender-signature",
+                        file=sys.stderr,
+                    )
                 return 2
             data.mkdir(parents=True, exist_ok=True)
             config = {
@@ -930,11 +970,17 @@ def _initialize(email_to: list[str], keywords: list[str], emit: bool = True) -> 
                     "scopus_insttoken_env": "SCOPUS_INSTTOKEN",
                     "google_scholar_api_key_env": "SERPAPI_API_KEY",
                 },
-                "delivery": {"channel": "email", "email_to": clean_emails},
+                "delivery": {
+                    "channel": "email",
+                    "email_to": clean_emails,
+                    "recipient_salutation": clean_salutation,
+                    "sender_signature": clean_signature,
+                },
                 "schedule": {"expression": "0 2 * * 5", "timezone": _profile_timezone()},
             }
             _write_config(config)
-    errors = _config_diagnostics()
+    current_config = _load_config()
+    errors = _config_diagnostics() + (_personalization_errors(current_config) if current_config else [])
     if emit:
         print(json.dumps({"ok": not errors, "config": str(config_path), "migrated_from": migrated_from, "errors": errors}, ensure_ascii=False, indent=2))
     return 0 if not errors else 2
@@ -1001,12 +1047,17 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
     if action == "run":
         return _run(args)
     if action == "init":
-        return _initialize(args.email_to, args.keyword)
+        return _initialize(
+            args.email_to,
+            args.keyword,
+            args.recipient_salutation,
+            args.sender_signature,
+        )
     if action == "setup":
         supplied = any(
             getattr(args, name, None) not in (None, [], "")
             for name in (
-                "email_to", "keyword", "direction_term", "require_all", "require_any",
+                "email_to", "recipient_salutation", "sender_signature", "keyword", "direction_term", "require_all", "require_any",
                 "exclude_term", "minimum_any", "match_field", "selection_mode", "max_selected", "timezone", "schedule", "provider",
                 "model", "fallback_model", "use_profile_weights", "use_user_feedback",
                 "search_source", "semantic_scholar_api_key_env",

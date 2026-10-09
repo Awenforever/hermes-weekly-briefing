@@ -1,5 +1,15 @@
 # Changelog
 
+## 5.1.0 - 2026-10-09
+
+- Split delivery into a concise, reader-facing `email_body.md` and the full
+  attached `report.pdf`; never send `report.md` as the email body.
+- Build the letter from model-owned editorial rationale and grounded paper
+  analysis, with a short reading order and an explicit pointer to the PDF.
+- Require an explicitly configured recipient salutation and Hermes sign-off on
+  new installs, and guide existing installs to fill both before scheduling.
+- Apply the same letter/PDF boundary when rebuilding a report from a snapshot.
+
 ## 5.0.1 - 2026-10-07
 
 - Retry transient semantic-selection failures as bounded whole operations while

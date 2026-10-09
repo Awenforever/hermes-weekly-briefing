@@ -1567,6 +1567,75 @@ def make_report(week: str, selected: list[dict[str, Any]], stats: dict[str, Any]
     lines.append("> 作者与团队指标来自 OpenAlex，表示其数据库中的收录与引用情况，不等同于主观排名。")
     return "\n".join(lines)
 
+
+def make_email_brief(
+    week: str,
+    selected: list[dict[str, Any]],
+    narrative: dict[str, Any] | None,
+    delivery: dict[str, Any] | None,
+) -> str:
+    """Compose the reader-facing letter; never reuse the detailed report body.
+
+    The model-authored editorial rationale and per-paper analysis supply the
+    semantic content.  Runtime code owns the greeting, sign-off, length bound,
+    links and the explicit hand-off to the attached detailed report.
+    """
+    narrative = narrative if isinstance(narrative, dict) else {}
+    delivery = delivery if isinstance(delivery, dict) else {}
+    salutation = str(delivery.get("recipient_salutation") or "").strip()
+    signature = str(delivery.get("sender_signature") or "").strip()
+    if not salutation or not signature:
+        raise RuntimeError(
+            "email personalization is incomplete: configure recipient_salutation and sender_signature"
+        )
+
+    lines = [f"{salutation}：", "", f"这是我为你整理的 {week} 学术研究周报。"]
+    rationale = sentence_excerpt(
+        narrative.get("editorial_rationale") or narrative.get("overview") or "",
+        760,
+    )
+    if rationale:
+        lines.extend(["", rationale])
+
+    if selected:
+        lines.extend(["", "如果时间有限，我建议先从下面几篇开始：", ""])
+        for index, paper in enumerate(selected[:3], 1):
+            title = str(paper.get("title") or "未命名论文").strip()
+            url = source_url(paper)
+            label = f"[{title}]({url})" if url else title
+            analysis = _paper_analysis(paper)
+            semantic = paper.get("semantic_evaluation") if isinstance(paper.get("semantic_evaluation"), dict) else {}
+            reason = sentence_excerpt(
+                analysis.get("why_it_matters") or semantic.get("reason") or "",
+                260,
+            )
+            lines.append(f"{index}. {label}")
+            if reason:
+                lines.append(f"   {reason}")
+
+    prompts = narrative.get("next_week") if isinstance(narrative.get("next_week"), list) else []
+    if not prompts and selected:
+        prompts = list(_paper_analysis(selected[0]).get("limitations") or [])[:1]
+    prompts = [sentence_excerpt(value, 260) for value in prompts[:2] if str(value).strip()]
+    if prompts:
+        lines.extend(["", "读完后，也许值得继续追问："])
+        lines.extend(f"- {value}" for value in prompts)
+
+    lines.extend([
+        "",
+        "完整的论文分析、方法链、证据对比和作者团队信息都放在附件 `report.pdf` 中。",
+        "",
+        "祝好，",
+        signature,
+    ])
+    body = "\n".join(lines).strip() + "\n"
+    forbidden = ("## 流水线统计", "## 入选论文", "## 跨论文方法与证据对比")
+    if any(value in body for value in forbidden):
+        raise RuntimeError("email brief accidentally contains detailed report sections")
+    if len(body) > 5000:
+        raise RuntimeError("email brief exceeds the reader-facing length contract")
+    return body
+
 def make_report_html(week: str, selected: list[dict[str, Any]], stats: dict[str, Any], queries: list[str], out: Path, narrative: dict[str, Any] | None = None) -> str:
     narrative = narrative if isinstance(narrative, dict) else {}
     def esc(value: Any) -> str:
@@ -2414,9 +2483,14 @@ def main() -> int:
         })
         report_md = make_report(week, selected, stats, outdir, queries, narrative)
         report_md_path = outdir / "report.md"
+        email_body_path = outdir / "email_body.md"
         report_html_path = outdir / "report.html"
         report_pdf_path = outdir / "report.pdf"
         report_md_path.write_text(report_md, encoding="utf-8")
+        email_body_path.write_text(
+            make_email_brief(week, selected, narrative, delivery_settings),
+            encoding="utf-8",
+        )
         report_html = make_report_html(week, selected, stats, queries, report_html_path, narrative)
         quality_receipt = validate_report_quality(selected, report_html)
         make_pdf(report_html, report_md, report_pdf_path)
@@ -2432,7 +2506,7 @@ def main() -> int:
         configured_recipients = delivery_cfg.get("email_to") if isinstance(delivery_cfg.get("email_to"), list) else []
         email_to = args.email_to or [str(value) for value in configured_recipients if str(value).strip() and "$" not in str(value)]
         subject = f"⚚ 学术研究周报 {week}"
-        email_receipt = try_send_email(email_to, subject, report_md_path, report_pdf_path, bool(args.send_email and email_to))
+        email_receipt = try_send_email(email_to, subject, email_body_path, report_pdf_path, bool(args.send_email and email_to))
 
         delivery_receipt = {
             "version": 1,
@@ -2489,6 +2563,7 @@ def main() -> int:
                 "markdown": "report.md",
                 "html": "report.html",
                 "pdf": "report.pdf",
+                "email_body": "email_body.md",
                 "selected_snapshot": "selected_snapshot.json",
                 "semantic_selection_receipt": "semantic_selection_receipt.json",
                 "quarantine_receipt": "quarantine_receipt.json",
@@ -2507,7 +2582,7 @@ def main() -> int:
             [
                 "analysis.json", "selected_snapshot.json", "semantic_selection_receipt.json",
                 "quarantine_receipt.json",
-                "report.md", "report.html", "report.pdf", "quality_receipt.json",
+                "report.md", "report.html", "report.pdf", "email_body.md", "quality_receipt.json",
                 "delivery_receipt.json", "manifest.json",
             ],
         )

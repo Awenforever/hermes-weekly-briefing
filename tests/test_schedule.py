@@ -219,7 +219,9 @@ class ScheduleTests(unittest.TestCase):
             with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
                 plugin, "_profile_timezone", return_value="Europe/Berlin"
             ):
-                self.assertEqual(0, plugin._initialize(["a@example.com"], ["quantum error correction"]))
+                self.assertEqual(0, plugin._initialize(
+                    ["a@example.com"], ["quantum error correction"], "王老师", "Hermes"
+                ))
                 self.assertEqual([], plugin._config_diagnostics())
             config = __import__("json").loads((home / "plugin-data" / "hermes-weekly-briefing" / "config.json").read_text(encoding="utf-8"))
             self.assertNotIn("use_profile_weights", config["research"])
@@ -233,7 +235,9 @@ class ScheduleTests(unittest.TestCase):
             with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
                 plugin, "_profile_timezone", return_value=""
             ):
-                self.assertEqual(2, plugin._initialize(["a@example.com"], ["graph algorithms"]))
+                self.assertEqual(2, plugin._initialize(
+                    ["a@example.com"], ["graph algorithms"], "王老师", "Hermes"
+                ))
                 errors = plugin._config_diagnostics()
             self.assertIn("schedule.timezone needs an explicit IANA timezone", errors)
 
@@ -305,7 +309,7 @@ class ScheduleTests(unittest.TestCase):
                 self.assertIn("agently_install", state["unresolved"])
             data = home / "plugin-data" / "hermes-weekly-briefing"
             data.mkdir(parents=True)
-            (data / "config.json").write_text('{"research":{"core_keywords":["graph algorithms"]},"delivery":{"channel":"email","email_to":["a@example.com"]},"schedule":{"timezone":"Europe/Berlin"}}', encoding="utf-8")
+            (data / "config.json").write_text('{"research":{"core_keywords":["graph algorithms"]},"delivery":{"channel":"email","email_to":["a@example.com"],"recipient_salutation":"王老师","sender_signature":"Hermes"},"schedule":{"timezone":"Europe/Berlin"}}', encoding="utf-8")
             with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": False, "cli": "/bin/agently-cli", "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
                 state = plugin._setup_status()
                 self.assertEqual(["agently_login"], state["unresolved"])
@@ -316,6 +320,8 @@ class ScheduleTests(unittest.TestCase):
             home = Path(raw)
             args = argparse.Namespace(
                 email_to=["researcher@example.com"],
+                recipient_salutation="王老师",
+                sender_signature="Hermes 研究助理",
                 keyword=["quantum error correction", "fault-tolerant computing"],
                 direction_term=["quantum code", "fault-tolerant"],
                 selection_mode="semantic",
@@ -338,6 +344,29 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual(["quantum code", "fault-tolerant"], config["research"]["direction_terms"])
             self.assertEqual("semantic", config["research"]["relevance"]["mode"])
             self.assertEqual("primary-model", config["analysis"]["model"])
+            self.assertEqual("王老师", config["delivery"]["recipient_salutation"])
+            self.assertEqual("Hermes 研究助理", config["delivery"]["sender_signature"])
+
+    def test_existing_install_is_guided_to_missing_letter_identity(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            data = home / "plugin-data" / "hermes-weekly-briefing"
+            data.mkdir(parents=True)
+            (data / "config.json").write_text(
+                '{"research":{"core_keywords":["graph algorithms"]},'
+                '"delivery":{"channel":"email","email_to":["a@example.com"]},'
+                '"schedule":{"timezone":"Europe/Berlin"},"search":{"sources":["arxiv"]}}',
+                encoding="utf-8",
+            )
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
+                plugin, "_mail_status", return_value={"installed": True, "authenticated": True}
+            ), mock.patch.object(
+                plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}
+            ):
+                state = plugin._setup_status()
+            self.assertIn("personal_preferences", state["unresolved"])
+            self.assertEqual(2, len(state["personalization_errors"]))
+            self.assertIn("preferred form of address", state["next_action"])
 
     def test_setup_requires_a_reachable_academic_search_engine(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -345,7 +374,7 @@ class ScheduleTests(unittest.TestCase):
             data = home / "plugin-data" / "hermes-weekly-briefing"
             data.mkdir(parents=True)
             (data / "config.json").write_text(
-                '{"research":{"core_keywords":["graph algorithms"]},"delivery":{"channel":"email","email_to":["a@example.com"]},"schedule":{"timezone":"Europe/Berlin"},"search":{"sources":["arxiv"]}}',
+                '{"research":{"core_keywords":["graph algorithms"]},"delivery":{"channel":"email","email_to":["a@example.com"],"recipient_salutation":"王老师","sender_signature":"Hermes"},"schedule":{"timezone":"Europe/Berlin"},"search":{"sources":["arxiv"]}}',
                 encoding="utf-8",
             )
             unavailable = {"ok": False, "ready_sources": [], "next_action": "configure an academic search engine"}
