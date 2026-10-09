@@ -100,11 +100,19 @@ class ReportRendererTests(unittest.TestCase):
         report = runner.make_report("2026-W41", papers, {}, Path("."), [], {})
         self.assertNotEqual(report, body)
 
-    def test_email_brief_refuses_missing_salutation_or_signature(self):
-        with self.assertRaisesRegex(RuntimeError, "personalization is incomplete"):
-            runner.make_email_brief(
-                "2026-W41", self.sample_papers(), {}, {"recipient_salutation": "王老师"}
-            )
+    def test_email_brief_uses_portable_defaults_for_missing_identity(self):
+        body = runner.make_email_brief("2026-W41", self.sample_papers(), {}, {})
+        self.assertTrue(body.startswith("你好："))
+        self.assertTrue(body.rstrip().endswith("Hermes"))
+
+    def test_legacy_explicit_identity_is_resolved_before_defaults(self):
+        delivery = runner.effective_email_delivery({
+            "user": {"display_name": "Kelvin J."},
+            "style": {"signature": "庄奕"},
+            "delivery": {"email_to": ["reader@example.com"]},
+        })
+        self.assertEqual("Kelvin J.", delivery["recipient_salutation"])
+        self.assertEqual("庄奕", delivery["sender_signature"])
 
     def test_fixed_focus_does_not_consume_profile_by_default(self):
         queries = runner.build_queries(

@@ -347,7 +347,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual("王老师", config["delivery"]["recipient_salutation"])
             self.assertEqual("Hermes 研究助理", config["delivery"]["sender_signature"])
 
-    def test_existing_install_is_guided_to_missing_letter_identity(self):
+    def test_existing_install_uses_portable_letter_identity_defaults(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
             data = home / "plugin-data" / "hermes-weekly-briefing"
@@ -364,9 +364,39 @@ class ScheduleTests(unittest.TestCase):
                 plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}
             ):
                 state = plugin._setup_status()
-            self.assertIn("personal_preferences", state["unresolved"])
-            self.assertEqual(2, len(state["personalization_errors"]))
-            self.assertIn("preferred form of address", state["next_action"])
+            self.assertNotIn("personal_preferences", state["unresolved"])
+            self.assertEqual([], state["personalization_errors"])
+            self.assertEqual("你好", state["personalization"]["recipient_salutation"])
+            self.assertEqual("Hermes", state["personalization"]["sender_signature"])
+            self.assertTrue(state["personalization"]["customization_recommended"])
+
+    def test_existing_explicit_legacy_identity_wins_over_defaults(self):
+        config = {
+            "user": {"display_name": "Kelvin J."},
+            "style": {"signature": "庄奕"},
+            "delivery": {},
+        }
+        effective = plugin._effective_personalization(config)
+        self.assertEqual("Kelvin J.", effective["recipient_salutation"])
+        self.assertEqual("庄奕", effective["sender_signature"])
+        self.assertEqual("user.display_name", effective["recipient_salutation_source"])
+        self.assertEqual("style.signature", effective["sender_signature_source"])
+
+    def test_new_setup_persists_defaults_when_personalization_is_omitted(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
+                plugin, "_profile_timezone", return_value="Asia/Shanghai"
+            ):
+                self.assertEqual(
+                    0,
+                    plugin._initialize(["researcher@example.com"], ["graph algorithms"], emit=False),
+                )
+            config = __import__("json").loads(
+                (home / "plugin-data" / "hermes-weekly-briefing" / "config.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual("你好", config["delivery"]["recipient_salutation"])
+            self.assertEqual("Hermes", config["delivery"]["sender_signature"])
 
     def test_setup_requires_a_reachable_academic_search_engine(self):
         with tempfile.TemporaryDirectory() as raw:

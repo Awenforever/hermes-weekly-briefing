@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 安装、个性化配置、运行并通过邮件交付研究论文周报；包含作者团队调研、可点击原文链接和中文 PDF。
-version: 5.1.0
+version: 5.1.1
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver
@@ -20,8 +20,8 @@ related_skills:
 3. 对尚未确定的内容逐项确认：
    - 一个或多个核心研究方向/关键词；
    - 收件邮箱；
-   - 邮件中对用户的称呼；不得从账号名、邮箱地址或历史消息擅自猜测；
-   - Hermes 在邮件结尾使用的署名；
+   - 邮件中对用户的称呼；未定制时说明可使用开箱默认值“你好”，不得从账号名、邮箱地址或历史消息擅自猜测；
+   - Hermes 在邮件结尾使用的署名；未定制时说明可使用开箱默认值“Hermes”；
    - 每期篇数；
    - 每周发送时间和时区；计划任务使用 Hermes profile 的 IANA 时区，若不一致须先说明影响并征得同意后调整 Hermes 时区；
    - 可选的主模型和备用模型（用户无偏好时留空，动态继承 Hermes 路由）；

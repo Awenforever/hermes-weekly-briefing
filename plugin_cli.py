@@ -38,6 +38,9 @@ DEFAULT_SEARCH_SOURCES = [
     "europe_pmc", "core", "hal", "zenodo", "datacite",
 ]
 
+DEFAULT_RECIPIENT_SALUTATION = "你好"
+DEFAULT_SENDER_SIGNATURE = "Hermes"
+
 
 def _trusted_ssl_context() -> ssl.SSLContext:
     """Use Hermes' bundled CA store when embedded Python has none (Windows)."""
@@ -269,15 +272,43 @@ def _config_diagnostics() -> list[str]:
     return errors
 
 
+def _effective_personalization(config: dict) -> dict[str, str]:
+    def usable(value: object) -> str:
+        text = str(value or "").strip()
+        return "" if "$" in text else text
+
+    delivery = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
+    recipient_salutation = usable(delivery.get("recipient_salutation"))
+    sender_signature = usable(delivery.get("sender_signature"))
+    user = config.get("user") if isinstance(config.get("user"), dict) else {}
+    style = config.get("style") if isinstance(config.get("style"), dict) else {}
+    salutation_source = "delivery.recipient_salutation"
+    signature_source = "delivery.sender_signature"
+    if not recipient_salutation:
+        recipient_salutation = usable(user.get("display_name"))
+        salutation_source = "user.display_name" if recipient_salutation else "default"
+    if not sender_signature:
+        sender_signature = usable(style.get("signature"))
+        signature_source = "style.signature" if sender_signature else "default"
+    if not recipient_salutation:
+        recipient_salutation = DEFAULT_RECIPIENT_SALUTATION
+    if not sender_signature:
+        sender_signature = DEFAULT_SENDER_SIGNATURE
+    return {
+        "recipient_salutation": recipient_salutation,
+        "sender_signature": sender_signature,
+        "recipient_salutation_source": salutation_source,
+        "sender_signature_source": signature_source,
+    }
+
+
 def _personalization_errors(config: dict) -> list[str]:
     delivery = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
     errors = []
-    recipient_salutation = str(delivery.get("recipient_salutation") or "").strip()
-    if not recipient_salutation or "$" in recipient_salutation:
-        errors.append("delivery.recipient_salutation needs the user's preferred form of address")
-    sender_signature = str(delivery.get("sender_signature") or "").strip()
-    if not sender_signature or "$" in sender_signature:
-        errors.append("delivery.sender_signature needs the preferred Hermes sign-off")
+    if "$" in str(delivery.get("recipient_salutation") or ""):
+        errors.append("delivery.recipient_salutation contains an unresolved placeholder")
+    if "$" in str(delivery.get("sender_signature") or ""):
+        errors.append("delivery.sender_signature contains an unresolved placeholder")
     return errors
 
 
@@ -823,6 +854,15 @@ def _setup_status() -> dict:
         ),
         "privacy": "Never ask the user to paste a mail password, token, cookie, or OAuth code into chat.",
         "personalization_errors": personalization_errors,
+        "personalization": {
+            **_effective_personalization(config),
+            "customization_recommended": any(
+                value == "default" for value in (
+                    _effective_personalization(config)["recipient_salutation_source"],
+                    _effective_personalization(config)["sender_signature_source"],
+                )
+            ),
+        } if config else {},
         "config": config,
     }
 
@@ -945,13 +985,13 @@ def _initialize(
         else:
             clean_emails = [str(value).strip() for value in email_to if "@" in str(value) and "$" not in str(value)]
             clean_keywords = [str(value).strip() for value in keywords if str(value).strip() and "$" not in str(value)]
-            clean_salutation = str(recipient_salutation or "").strip()
-            clean_signature = str(sender_signature or "").strip()
-            if not clean_emails or not clean_keywords or not clean_salutation or not clean_signature:
+            clean_salutation = str(recipient_salutation or DEFAULT_RECIPIENT_SALUTATION).strip()
+            clean_signature = str(sender_signature or DEFAULT_SENDER_SIGNATURE).strip()
+            if not clean_emails or not clean_keywords:
                 if emit:
                     print(
-                        "new setup requires --email-to, at least one --keyword, "
-                        "--recipient-salutation and --sender-signature",
+                        "new setup requires --email-to and at least one --keyword; "
+                        "salutation and sign-off use editable defaults when omitted",
                         file=sys.stderr,
                     )
                 return 2

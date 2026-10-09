@@ -72,6 +72,28 @@ DEFAULT_SEARCH_SOURCES = [
     "openalex", "semantic_scholar", "crossref", "arxiv", "dblp", "openreview",
     "europe_pmc", "core", "hal", "zenodo", "datacite",
 ]
+DEFAULT_RECIPIENT_SALUTATION = "你好"
+DEFAULT_SENDER_SIGNATURE = "Hermes"
+
+
+def effective_email_delivery(config: dict[str, Any]) -> dict[str, Any]:
+    """Resolve explicit, legacy-explicit, then portable default letter identity."""
+    def usable(value: Any) -> str:
+        text = str(value or "").strip()
+        return "" if "$" in text else text
+
+    delivery = dict(config.get("delivery")) if isinstance(config.get("delivery"), dict) else {}
+    user = config.get("user") if isinstance(config.get("user"), dict) else {}
+    style = config.get("style") if isinstance(config.get("style"), dict) else {}
+    if not usable(delivery.get("recipient_salutation")):
+        delivery["recipient_salutation"] = (
+            usable(user.get("display_name")) or DEFAULT_RECIPIENT_SALUTATION
+        )
+    if not usable(delivery.get("sender_signature")):
+        delivery["sender_signature"] = (
+            usable(style.get("signature")) or DEFAULT_SENDER_SIGNATURE
+        )
+    return delivery
 
 
 def trusted_ssl_context() -> ssl.SSLContext:
@@ -1582,12 +1604,8 @@ def make_email_brief(
     """
     narrative = narrative if isinstance(narrative, dict) else {}
     delivery = delivery if isinstance(delivery, dict) else {}
-    salutation = str(delivery.get("recipient_salutation") or "").strip()
-    signature = str(delivery.get("sender_signature") or "").strip()
-    if not salutation or not signature:
-        raise RuntimeError(
-            "email personalization is incomplete: configure recipient_salutation and sender_signature"
-        )
+    salutation = str(delivery.get("recipient_salutation") or DEFAULT_RECIPIENT_SALUTATION).strip()
+    signature = str(delivery.get("sender_signature") or DEFAULT_SENDER_SIGNATURE).strip()
 
     lines = [f"{salutation}：", "", f"这是我为你整理的 {week} 学术研究周报。"]
     rationale = sentence_excerpt(
@@ -2181,7 +2199,7 @@ def main() -> int:
 
     try:
         config = read_json(DATA_DIR / "config.json", {})
-        delivery_settings = config.get("delivery") if isinstance(config.get("delivery"), dict) else {}
+        delivery_settings = effective_email_delivery(config)
         os.environ.setdefault(
             "AGENTLY_WORKSPACE",
             str(delivery_settings.get("agently_workspace") or "hermes").strip(),

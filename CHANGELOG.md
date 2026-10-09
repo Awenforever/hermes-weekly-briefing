@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.1.1 - 2026-10-09
+
+- Keep salutation and Hermes sign-off customization in onboarding while making
+  fresh installations immediately usable with `你好` and `Hermes` defaults.
+- Preserve explicit legacy `user.display_name` and `style.signature` values
+  during upgrades instead of replacing them with public defaults.
+
 ## 5.1.0 - 2026-10-09
 
 - Split delivery into a concise, reader-facing `email_body.md` and the full
