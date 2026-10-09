@@ -11,6 +11,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -964,30 +965,73 @@ def _model_status(config: dict) -> dict:
         return {"ready": False, "diagnostic": str(exc)}
 
 
-def _renderer_status(check_latest: bool = False) -> dict:
-    runtime = _runtime_path()
+def _renderer_status(check_latest: bool = False, runtime_path: Path | None = None) -> dict:
+    runtime = (runtime_path or _runtime_path()).resolve()
     probe = f"""
 import importlib
 import importlib.metadata
 import json
+import re
 import sys
 from pathlib import Path
 
 runtime = Path({str(runtime)!r}).resolve()
 sys.path.insert(0, str(runtime))
 result = {{}}
+metadata = {{"weasyprint": [], "reportlab": []}}
+for dist in importlib.metadata.distributions(path=[str(runtime)]):
+    raw_name = str(dist.metadata.get("Name") or "")
+    name = re.sub(r"[-_.]+", "-", raw_name).lower()
+    if name in metadata:
+        metadata[name].append({{
+            "version": str(dist.version or ""),
+            "path": str(getattr(dist, "_path", "")),
+        }})
 for name in ("weasyprint", "reportlab"):
     try:
         module = importlib.import_module(name)
         origin = Path(module.__file__).resolve()
+        isolated = origin == runtime or runtime in origin.parents
+        module_version = str(
+            getattr(module, "__version__", "")
+            or getattr(module, "Version", "")
+        )
+        distributions = metadata[name]
+        metadata_versions = sorted({{item["version"] for item in distributions if item["version"]}})
+        integrity_errors = []
+        if isolated and len(distributions) != 1:
+            integrity_errors.append(
+                f"{{name}} has {{len(distributions)}} distribution metadata records; expected exactly one"
+            )
+        if isolated and len(metadata_versions) == 1 and module_version and metadata_versions[0] != module_version:
+            integrity_errors.append(
+                f"{{name}} import version {{module_version}} does not match metadata {{metadata_versions[0]}}"
+            )
         result[name] = {{
             "available": True,
-            "isolated": origin == runtime or runtime in origin.parents,
+            "isolated": isolated,
             "origin": str(origin),
-            "version": importlib.metadata.version(name),
+            "version": module_version or (metadata_versions[0] if len(metadata_versions) == 1 else ""),
+            "metadata": distributions,
+            "metadata_versions": metadata_versions,
+            "integrity_errors": integrity_errors,
         }}
     except Exception as exc:
-        result[name] = {{"available": False, "isolated": False, "error": str(exc)}}
+        distributions = metadata[name]
+        metadata_versions = sorted({{item["version"] for item in distributions if item["version"]}})
+        integrity_errors = []
+        if len(distributions) > 1:
+            integrity_errors.append(
+                f"{{name}} has {{len(distributions)}} distribution metadata records; expected at most one when unavailable"
+            )
+        result[name] = {{
+            "available": False,
+            "isolated": False,
+            "error": str(exc),
+            "metadata": distributions,
+            "metadata_versions": metadata_versions,
+            "integrity_errors": integrity_errors,
+        }}
 print(json.dumps(result))
 """
     try:
@@ -1010,11 +1054,19 @@ print(json.dumps(result))
         and result[name].get("available") is True
         and result[name].get("isolated") is not True
     ]
-    versions = {
-        name: str(value.get("version") or "")
-        for name, value in result.items()
-        if isinstance(value, dict) and value.get("isolated") is True
-    }
+    versions = {}
+    for name, value in result.items():
+        if not isinstance(value, dict):
+            continue
+        if value.get("isolated") is True:
+            versions[name] = str(value.get("version") or "")
+            continue
+        metadata_versions = value.get("metadata_versions", [])
+        if value.get("available") is False and len(metadata_versions) == 1:
+            # Optional WeasyPrint may be correctly installed but unavailable
+            # because the OS lacks Pango/GTK. Its isolated distribution
+            # metadata still provides an unambiguous update version.
+            versions[name] = str(metadata_versions[0])
     latest_versions = {
         name: _pypi_latest(name) for name in ("weasyprint", "reportlab")
     } if check_latest else {}
@@ -1027,9 +1079,18 @@ print(json.dumps(result))
     # WeasyPrint is installed at its current release too, but native GTK/Pango
     # availability is an OS capability rather than a Python package version;
     # its import failure must not make a healthy ReportLab fallback unusable.
-    complete = "reportlab" in isolated
+    integrity_errors = [
+        str(error)
+        for name in ("weasyprint", "reportlab")
+        for error in (
+            result.get(name, {}).get("integrity_errors", [])
+            if isinstance(result.get(name), dict) else []
+        )
+    ]
+    integrity_ok = not integrity_errors
+    complete = "reportlab" in isolated and integrity_ok
     return {
-        "ready": bool(isolated),
+        "ready": bool(isolated) and integrity_ok,
         "complete": complete,
         "available": isolated,
         "host_available": host_available,
@@ -1039,6 +1100,13 @@ print(json.dumps(result))
             if isinstance(value, dict) and value.get("origin")
         },
         "versions": versions,
+        "metadata_versions": {
+            name: value.get("metadata_versions", [])
+            for name, value in result.items()
+            if isinstance(value, dict)
+        },
+        "integrity_ok": integrity_ok,
+        "integrity_errors": integrity_errors,
         "latest_versions": latest_versions,
         "update_available": updates,
         "required_renderer": "reportlab",
@@ -1046,10 +1114,69 @@ print(json.dumps(result))
         "runtime": str(runtime),
         "isolated": bool(isolated),
         "diagnostic": (
+            "plugin-owned PDF runtime has conflicting package metadata; run dependencies-update --yes"
+            if integrity_errors else
             "plugin-owned PDF runtime is ready" if isolated else
             "run runtime-install --yes; packages found only in Hermes core are not persistent"
         ),
     }
+
+
+def _runtime_render_smoke(runtime: Path) -> dict:
+    scripts = _root() / "research" / "weekly-briefing-v2" / "scripts"
+    probe = f"""
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, {str(runtime.resolve())!r})
+sys.path.insert(0, {str(scripts.resolve())!r})
+from run_weekly_e2e import make_pdf
+
+with tempfile.TemporaryDirectory(prefix="weekly-runtime-smoke-") as raw:
+    target = Path(raw) / "smoke.pdf"
+    make_pdf(
+        "<html><body><h1>Weekly Briefing</h1><p>Dependency compatibility check.</p></body></html>",
+        "# Weekly Briefing\\n\\nDependency compatibility check.",
+        target,
+    )
+    payload = target.read_bytes()
+    ok = payload.startswith(b"%PDF") and len(payload) > 500
+    print(json.dumps({{"ok": ok, "size": len(payload)}}))
+    raise SystemExit(0 if ok else 2)
+"""
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", probe], text=True, encoding="utf-8",
+            errors="replace", capture_output=True, timeout=90, check=False,
+        )
+        lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        result = json.loads(lines[-1]) if lines else {}
+        return {
+            "ok": completed.returncode == 0 and result.get("ok") is True,
+            "size": int(result.get("size") or 0),
+            "diagnostic": completed.stderr.strip()[-1000:],
+        }
+    except Exception as exc:
+        return {"ok": False, "size": 0, "diagnostic": str(exc)}
+
+
+def _swap_runtime(stage: Path, runtime: Path) -> None:
+    backup = runtime.with_name(
+        f".{runtime.name}.rollback-{os.getpid()}-{int(time.time() * 1000)}"
+    )
+    had_runtime = runtime.exists()
+    if had_runtime:
+        runtime.rename(backup)
+    try:
+        stage.rename(runtime)
+    except Exception:
+        if had_runtime and backup.exists() and not runtime.exists():
+            backup.rename(runtime)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
 
 
 def _install_runtime(confirmed: bool, emit: bool = True) -> int:
@@ -1061,29 +1188,50 @@ def _install_runtime(confirmed: bool, emit: bool = True) -> int:
     # by freezing users on an old major version.
     packages = ["weasyprint", "reportlab"]
     runtime = _runtime_path()
-    runtime.mkdir(parents=True, exist_ok=True)
+    runtime.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=f".{runtime.name}.stage-", dir=runtime.parent))
     if importlib.util.find_spec("pip") is not None:
         command = [
             sys.executable, "-m", "pip", "install", "--upgrade",
-            "--target", str(runtime), *packages,
+            "--target", str(stage), *packages,
         ]
     else:
         uv = _find_uv()
         if not uv:
             print("Neither pip nor uv is available; install one package manager first", file=sys.stderr)
+            shutil.rmtree(stage, ignore_errors=True)
             return 2
         command = _portable_command(
             uv, "pip", "install", "--python", sys.executable,
-            "--upgrade", "--target", str(runtime), *packages
+            "--upgrade", "--target", str(stage), *packages
         )
-    completed = subprocess.run(command)
-    if completed.returncode:
-        return completed.returncode
+    try:
+        completed = subprocess.run(command)
+        if completed.returncode:
+            return completed.returncode
+        status = _renderer_status(check_latest=True, runtime_path=stage)
+        smoke = _runtime_render_smoke(stage)
+        status["render_smoke"] = smoke
+        status["operation"] = "runtime_update"
+        if not status.get("complete") or status.get("update_available") or not smoke.get("ok"):
+            if emit:
+                print(json.dumps(status, ensure_ascii=False, indent=2))
+            return 2
+        _swap_runtime(stage, runtime)
+        stage = Path()
+    finally:
+        if stage and stage.exists() and stage != Path("."):
+            shutil.rmtree(stage, ignore_errors=True)
     status = _renderer_status(check_latest=True)
+    status["render_smoke"] = _runtime_render_smoke(runtime)
     status["operation"] = "runtime_update"
     if emit:
         print(json.dumps(status, ensure_ascii=False, indent=2))
-    return 0 if status.get("complete") and not status.get("update_available") else 2
+    return 0 if (
+        status.get("complete")
+        and not status.get("update_available")
+        and status.get("render_smoke", {}).get("ok") is True
+    ) else 2
 
 
 def _install_mail(confirmed: bool, emit: bool = True) -> int:
@@ -1133,7 +1281,9 @@ def _dependencies_status() -> dict:
         errors.append("installed Agently CLI does not satisfy the current send/login contract")
     if mail.get("update_available"):
         errors.append("Agently CLI update is available")
-    if not runtime.get("complete"):
+    if runtime.get("integrity_ok") is False:
+        errors.append("plugin-owned PDF runtime has conflicting package metadata")
+    elif not runtime.get("complete"):
         errors.append("plugin-owned PDF runtime is not installed")
     elif runtime.get("update_available"):
         errors.append("plugin-owned PDF runtime updates are available")
@@ -1195,7 +1345,9 @@ def _doctor_result() -> dict:
         errors.append("Agently CLI login is required")
     if not model["ready"]:
         errors.append("analysis provider is not ready")
-    if not renderer.get("complete"):
+    if renderer.get("integrity_ok") is False:
+        errors.append("plugin-owned PDF runtime has conflicting package metadata; run dependencies-update --yes")
+    elif not renderer.get("complete"):
         errors.append("plugin-owned PDF renderer is not installed")
     elif renderer.get("update_available"):
         errors.append("plugin-owned PDF runtime updates are available; run dependencies-update --yes")
@@ -1236,6 +1388,7 @@ def _setup_status() -> dict:
     dependency_update = bool(
         mail.get("update_available")
         or mail.get("compatible") is False
+        or renderer.get("integrity_ok") is False
         or renderer.get("update_available")
     )
     if dependency_install:

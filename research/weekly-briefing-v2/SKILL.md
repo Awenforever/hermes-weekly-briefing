@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 安装、个性化配置、运行并通过邮件交付研究论文周报；包含作者团队调研、可点击原文链接和中文 PDF。
-version: 5.3.0
+version: 5.3.1
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver
@@ -36,6 +36,7 @@ related_skills:
    - 缺失、落后或契约不兼容时，说明会更新全局 Agently 和插件隔离 PDF 依赖，获得同意后运行 `dependencies-update --yes`；更新后必须再次运行 `dependencies-status` 和 `doctor`；
    - 依赖使用当前稳定版，不因旧插件版本人为设置上限。若最新版破坏当前契约，必须明确停止并报告，不得静默降级到旧依赖；
    - PDF 包只能安装在插件自己的持久化数据目录，禁止写入 Hermes 核心 Python 环境。
+   - PDF 依赖更新必须先安装到同级临时目录，核对每个发行包只有一份元数据、导入版本与元数据一致，并完成真实 PDF 冒烟渲染；全部通过后才原子替换正式运行时。失败时保留旧运行时，禁止在活动目录上做 `--target --upgrade` 式覆盖安装。
 7. 检查 Agently 登录：
    - 未登录时运行 `mail-login-start`；把返回的 `verification_url` 作为可点击链接呈现给用户。若返回 `media_directive`，须在同一回复中原样单独输出 `MEDIA:/absolute/path.png`，由当前 Hermes 平台适配器负责发送二维码；没有二维码不影响登录；
    - 命令行会话同样显示登录链接；用户授权后运行 `mail-login-status`。未通过真实身份检查前不得声称成功；

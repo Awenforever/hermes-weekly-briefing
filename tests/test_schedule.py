@@ -135,6 +135,8 @@ class ScheduleTests(unittest.TestCase):
                 plugin.subprocess, "run", return_value=argparse.Namespace(returncode=0)
             ) as run, mock.patch.object(
                 plugin, "_renderer_status", return_value={"ready": True, "complete": True, "update_available": {}}
+            ), mock.patch.object(
+                plugin, "_runtime_render_smoke", return_value={"ok": True, "size": 1024, "diagnostic": ""}
             ):
                 self.assertEqual(0, plugin._install_runtime(True))
             command = run.call_args.args[0]
@@ -143,7 +145,83 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual(["--upgrade", "--target"], command[5:7])
             self.assertEqual(["weasyprint", "reportlab"], command[-2:])
             expected = home / "plugin-data" / "hermes-weekly-briefing" / "runtime" / f"{plugin.sys.implementation.cache_tag}-{plugin.sys.platform}"
-            self.assertEqual(str(expected), command[7])
+            target = Path(command[7])
+            self.assertEqual(expected.parent, target.parent)
+            self.assertTrue(target.name.startswith(f".{expected.name}.stage-"))
+            self.assertTrue(expected.is_dir())
+
+    def test_renderer_rejects_duplicate_distribution_metadata_even_when_import_is_new(self):
+        with tempfile.TemporaryDirectory() as raw:
+            runtime = Path(raw) / "runtime"
+            (runtime / "weasyprint").mkdir(parents=True)
+            (runtime / "weasyprint" / "__init__.py").write_text(
+                "__version__ = '70.0'\n", encoding="utf-8"
+            )
+            (runtime / "reportlab").mkdir()
+            (runtime / "reportlab" / "__init__.py").write_text(
+                "Version = '5.0.1'\n", encoding="utf-8"
+            )
+            for name, version in (("weasyprint", "69.0"), ("weasyprint", "70.0"), ("reportlab", "5.0.1")):
+                dist = runtime / f"{name}-{version}.dist-info"
+                dist.mkdir()
+                (dist / "METADATA").write_text(
+                    f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
+                    encoding="utf-8",
+                )
+            status = plugin._renderer_status(runtime_path=runtime)
+        self.assertFalse(status["integrity_ok"])
+        self.assertFalse(status["complete"])
+        self.assertEqual("70.0", status["versions"]["weasyprint"])
+        self.assertEqual(["69.0", "70.0"], status["metadata_versions"]["weasyprint"])
+        self.assertTrue(any("weasyprint has 2" in item for item in status["integrity_errors"]))
+
+    def test_runtime_swap_replaces_the_whole_owned_directory(self):
+        with tempfile.TemporaryDirectory() as raw:
+            parent = Path(raw)
+            runtime = parent / "runtime"
+            stage = parent / ".runtime.stage-test"
+            runtime.mkdir()
+            stage.mkdir()
+            (runtime / "weasyprint-69.0.dist-info").mkdir()
+            (stage / "weasyprint-70.0.dist-info").mkdir()
+            (stage / "reportlab-5.0.1.dist-info").mkdir()
+            plugin._swap_runtime(stage, runtime)
+            self.assertFalse(stage.exists())
+            self.assertFalse((runtime / "weasyprint-69.0.dist-info").exists())
+            self.assertTrue((runtime / "weasyprint-70.0.dist-info").is_dir())
+            self.assertFalse(list(parent.glob(".runtime.rollback-*")))
+
+    def test_failed_runtime_install_keeps_previous_runtime_and_cleans_stage(self):
+        with tempfile.TemporaryDirectory() as raw:
+            runtime = Path(raw) / "runtime" / "python-platform"
+            runtime.mkdir(parents=True)
+            (runtime / "sentinel.txt").write_text("old-runtime", encoding="utf-8")
+            with mock.patch.object(plugin, "_runtime_path", return_value=runtime), mock.patch.object(
+                plugin.importlib.util, "find_spec", return_value=object()
+            ), mock.patch.object(
+                plugin.subprocess, "run", return_value=argparse.Namespace(returncode=1)
+            ):
+                self.assertEqual(1, plugin._install_runtime(True, emit=False))
+            self.assertEqual("old-runtime", (runtime / "sentinel.txt").read_text(encoding="utf-8"))
+            self.assertFalse(list(runtime.parent.glob(f".{runtime.name}.stage-*")))
+
+    def test_failed_render_validation_never_replaces_previous_runtime(self):
+        with tempfile.TemporaryDirectory() as raw:
+            runtime = Path(raw) / "runtime" / "python-platform"
+            runtime.mkdir(parents=True)
+            (runtime / "sentinel.txt").write_text("known-good", encoding="utf-8")
+            with mock.patch.object(plugin, "_runtime_path", return_value=runtime), mock.patch.object(
+                plugin.importlib.util, "find_spec", return_value=object()
+            ), mock.patch.object(
+                plugin.subprocess, "run", return_value=argparse.Namespace(returncode=0)
+            ), mock.patch.object(
+                plugin, "_renderer_status", return_value={"ready": True, "complete": True, "update_available": {}}
+            ), mock.patch.object(
+                plugin, "_runtime_render_smoke", return_value={"ok": False, "size": 0, "diagnostic": "boom"}
+            ):
+                self.assertEqual(2, plugin._install_runtime(True, emit=False))
+            self.assertEqual("known-good", (runtime / "sentinel.txt").read_text(encoding="utf-8"))
+            self.assertFalse(list(runtime.parent.glob(f".{runtime.name}.stage-*")))
 
     def test_runtime_is_plugin_owned_and_survives_core_environment_replacement(self):
         with tempfile.TemporaryDirectory() as raw:

@@ -218,7 +218,7 @@ hermes weekly-briefing mail-login-status
 
 `mail-login-start` 会快速返回可点击的授权链接，不会把 Hermes 对话卡在一个长期等待的子进程上。若隔离运行时支持二维码，还会返回 `MEDIA:` 图片契约；Weekly Briefing 只负责生成链接/图片，微信、飞书或其他渠道如何展示由 Hermes 自己的适配器负责。二维码不可用时链接仍可完成登录。插件不会伪造登录成功；只有 `mail-login-status` 的真实身份检查通过，计划任务才允许安装。身份、登录和发送固定使用 Hermes 的持久化 Agently 工作区：`mail-status` 已通过时不会重复要求登录。
 
-依赖策略面向新版本：Agently 明确安装 npm `latest`，WeasyPrint 与 ReportLab 不设置人为的旧版上限。更新完成并不等于兼容；插件随后会实测发送参数、确认令牌、设备登录、PDF 导入与报告渲染。若最新版不满足契约，安装会明确失败并保留诊断，而不是静默降级。网络暂时无法查询版本时会标为“未知”，不会谎报已经最新。
+依赖策略面向新版本：Agently 明确安装 npm `latest`，WeasyPrint 与 ReportLab 不设置人为的旧版上限。PDF 更新不会覆盖活动目录：插件先在同级临时目录完成全新安装，检查重复元数据、导入版本与发行版本的一致性，并执行真实 PDF 冒烟渲染；全部通过后才原子替换，失败则保留原运行时。更新完成并不等于兼容；插件还会实测发送参数、确认令牌和设备登录。若最新版不满足契约，安装会明确失败并保留诊断，而不是静默降级。网络暂时无法查询版本时会标为“未知”，不会谎报已经最新；本地存在多套冲突元数据时，即使断网也会阻断就绪并引导重建运行时。
 
 PDF 渲染依赖保存在当前 Hermes profile 的 `plugin-data/hermes-weekly-briefing/runtime/`，不会写入或污染 Hermes 核心 Python 环境；升级 Hermes 后也不会被核心依赖同步清除。
 

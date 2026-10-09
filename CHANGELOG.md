@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.3.1 - 2026-10-09
+
+- Replace in-place PDF dependency upgrades with a clean staged install and atomic runtime swap, preventing stale `dist-info` records from surviving across WeasyPrint or ReportLab upgrades.
+- Detect duplicate distribution metadata and imported-version/metadata mismatches independently of registry availability, so readiness cannot alternate between true and false when PyPI is unreachable.
+- Run the real Weekly Briefing PDF renderer against the staged runtime before activation; installation or validation failure leaves the previous runtime untouched and removes the failed staging directory.
+
 ## 5.3.0 - 2026-10-09
 
 - Add a dependency lifecycle that compares installed Agently/PDF components with current npm/PyPI stable releases on every guided install or plugin upgrade.
