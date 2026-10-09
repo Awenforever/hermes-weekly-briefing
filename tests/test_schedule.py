@@ -133,12 +133,15 @@ class ScheduleTests(unittest.TestCase):
                 plugin.shutil, "which", return_value=None
             ), mock.patch.object(plugin.importlib.util, "find_spec", return_value=None), mock.patch.object(
                 plugin.subprocess, "run", return_value=argparse.Namespace(returncode=0)
-            ) as run:
+            ) as run, mock.patch.object(
+                plugin, "_renderer_status", return_value={"ready": True, "complete": True, "update_available": {}}
+            ):
                 self.assertEqual(0, plugin._install_runtime(True))
             command = run.call_args.args[0]
             self.assertEqual(str(uv), command[0])
             self.assertEqual(["pip", "install", "--python", plugin.sys.executable], command[1:5])
             self.assertEqual(["--upgrade", "--target"], command[5:7])
+            self.assertEqual(["weasyprint", "reportlab"], command[-2:])
             expected = home / "plugin-data" / "hermes-weekly-briefing" / "runtime" / f"{plugin.sys.implementation.cache_tag}-{plugin.sys.platform}"
             self.assertEqual(str(expected), command[7])
 
@@ -162,6 +165,57 @@ class ScheduleTests(unittest.TestCase):
             self.assertTrue(plugin._mail_status()["authenticated"])
         self.assertEqual("hermes", run.call_args.kwargs["env"]["AGENTLY_WORKSPACE"])
         self.assertNotIn("HERMES_SESSION_ID", run.call_args.kwargs["env"])
+
+    def test_agently_contract_checks_the_commands_weekly_actually_uses(self):
+        outputs = {
+            ("agently-cli", "--version"): "agently-cli version 2.3.4",
+            ("agently-cli", "message", "+send", "--help"): (
+                "--to --subject --body-file --attachment --confirmation-token"
+            ),
+            ("agently-cli", "auth", "login", "--help"): "--verbose",
+        }
+        def run(command, **_kwargs):
+            return argparse.Namespace(returncode=0, stdout=outputs[tuple(command)], stderr="")
+        with mock.patch.object(plugin.subprocess, "run", side_effect=run), mock.patch.object(
+            plugin, "_agently_env", return_value={"AGENTLY_WORKSPACE": "hermes"}
+        ):
+            status = plugin._agently_contract("agently-cli")
+        self.assertTrue(status["compatible"])
+        self.assertEqual("2.3.4", status["installed_version"])
+
+    def test_mail_update_targets_latest_and_preserves_existing_authentication(self):
+        before = {"installed": True, "authenticated": True, "installed_version": "1.0.0"}
+        after = {
+            "installed": True, "authenticated": True, "installed_version": "1.1.0",
+            "latest_version": "1.1.0", "compatible": True, "update_available": False,
+            "workspace": "hermes", "diagnostic": "compatible",
+        }
+        completed = argparse.Namespace(returncode=0)
+        with mock.patch.object(plugin, "_find_npm", return_value="npm"), mock.patch.object(
+            plugin, "_mail_status", side_effect=[before, after]
+        ), mock.patch.object(plugin.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(0, plugin._install_mail(True, emit=False))
+        self.assertEqual(
+            ["npm", "install", "--global", "@tencent-qqmail/agently-cli@latest"],
+            run.call_args.args[0],
+        )
+
+    def test_dependency_status_rejects_known_updates_but_not_unknown_registry_state(self):
+        current_mail = {
+            "installed": True, "authenticated": True, "compatible": True,
+            "update_available": False,
+        }
+        current_runtime = {"ready": True, "complete": True, "update_available": {}}
+        with mock.patch.object(plugin, "_mail_status", return_value=current_mail), mock.patch.object(
+            plugin, "_renderer_status", return_value=current_runtime
+        ):
+            self.assertTrue(plugin._dependencies_status()["ok"])
+        with mock.patch.object(plugin, "_mail_status", return_value={**current_mail, "update_available": True}), mock.patch.object(
+            plugin, "_renderer_status", return_value=current_runtime
+        ):
+            status = plugin._dependencies_status()
+        self.assertFalse(status["ok"])
+        self.assertIn("Agently CLI update is available", status["errors"])
 
     def test_run_respects_explicit_isolated_data_directory(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -303,14 +357,14 @@ class ScheduleTests(unittest.TestCase):
     def test_setup_reports_mail_install_then_login_without_guessing_success(self):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
-            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": False, "authenticated": False, "cli": None, "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": False, "authenticated": False, "cli": None, "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_renderer_status", return_value={"ready": False, "complete": False, "update_available": {}}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
                 state = plugin._setup_status()
                 self.assertIn("personal_preferences", state["unresolved"])
-                self.assertIn("agently_install", state["unresolved"])
+                self.assertIn("dependencies_install", state["unresolved"])
             data = home / "plugin-data" / "hermes-weekly-briefing"
             data.mkdir(parents=True)
             (data / "config.json").write_text('{"research":{"core_keywords":["graph algorithms"]},"delivery":{"channel":"email","email_to":["a@example.com"],"recipient_salutation":"王老师","sender_signature":"Hermes"},"schedule":{"timezone":"Europe/Berlin"}}', encoding="utf-8")
-            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": False, "cli": "/bin/agently-cli", "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": False, "compatible": True, "update_available": False, "cli": "/bin/agently-cli", "install_package": "@tencent-qqmail/agently-cli"}), mock.patch.object(plugin, "_renderer_status", return_value={"ready": True, "complete": True, "update_available": {}}), mock.patch.object(plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}):
                 state = plugin._setup_status()
                 self.assertEqual(["agently_login"], state["unresolved"])
                 self.assertIn("mail-login-start", state["next_action"])
@@ -360,7 +414,9 @@ class ScheduleTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
-                plugin, "_mail_status", return_value={"installed": True, "authenticated": True}
+                plugin, "_mail_status", return_value={"installed": True, "authenticated": True, "compatible": True, "update_available": False}
+            ), mock.patch.object(
+                plugin, "_renderer_status", return_value={"ready": True, "complete": True, "update_available": {}}
             ), mock.patch.object(
                 plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}
             ):
@@ -470,10 +526,35 @@ class ScheduleTests(unittest.TestCase):
                 encoding="utf-8",
             )
             unavailable = {"ok": False, "ready_sources": [], "next_action": "configure an academic search engine"}
-            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": True}), mock.patch.object(plugin, "_search_status", return_value=unavailable):
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(plugin, "_mail_status", return_value={"installed": True, "authenticated": True, "compatible": True, "update_available": False}), mock.patch.object(plugin, "_renderer_status", return_value={"ready": True, "complete": True, "update_available": {}}), mock.patch.object(plugin, "_search_status", return_value=unavailable):
                 state = plugin._setup_status()
             self.assertIn("academic_search", state["unresolved"])
             self.assertIn("configure", state["next_action"])
+
+    def test_setup_blocks_known_outdated_dependencies_until_user_authorizes_update(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            data = home / "plugin-data" / "hermes-weekly-briefing"
+            data.mkdir(parents=True)
+            (data / "config.json").write_text(
+                '{"research":{"core_keywords":["graph algorithms"]},'
+                '"delivery":{"channel":"email","email_to":["a@example.com"]},'
+                '"schedule":{"timezone":"Europe/Berlin"},"search":{"sources":["arxiv"]}}',
+                encoding="utf-8",
+            )
+            mail = {
+                "installed": True, "authenticated": True, "compatible": True,
+                "update_available": True, "installed_version": "1.0.0", "latest_version": "1.1.0",
+            }
+            runtime = {"ready": True, "complete": True, "update_available": {}}
+            with mock.patch.object(plugin, "_home", return_value=home), mock.patch.object(
+                plugin, "_mail_status", return_value=mail
+            ), mock.patch.object(plugin, "_renderer_status", return_value=runtime), mock.patch.object(
+                plugin, "_search_status", return_value={"ok": True, "ready_sources": ["arxiv"], "next_action": "ready"}
+            ):
+                state = plugin._setup_status()
+        self.assertIn("dependencies_update", state["unresolved"])
+        self.assertIn("dependencies-update --yes", state["next_action"])
 
 
 if __name__ == "__main__":

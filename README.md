@@ -32,9 +32,9 @@ Hermes 读取本 README 与插件 Skill 后，会主动完成以下流程：
 
 1. 检查旧版数据并安全迁移，不覆盖已有配置和历史报告；
 2. 逐项询问尚未确定的个性化设置，而不是让你手写配置文件；
-3. 检查分析模型、PDF 渲染器与 Agently 邮件工具；
+3. 检查分析模型、PDF 渲染器与 Agently 邮件工具，并比较当前稳定版本；
 4. 实测所选学术搜索源，并说明开放来源与需要凭据的可选来源；
-5. 如缺少 Agently，在征得同意后安装；
+5. 如依赖缺失或有新版，在征得同意后更新到当前稳定版，并实测命令与渲染兼容性；
 6. 生成 Agently 授权链接并直接发回当前终端或 Hermes 对话渠道；可生成二维码时一并发送，由 Hermes 的微信、飞书等平台适配器负责实际展示；
 7. 验证登录状态，生成一份测试周报；
 8. 经你确认后再安装每周计划任务。
@@ -192,8 +192,11 @@ hermes weekly-briefing setup
 # 完整体检：研究配置、模型、PDF 与邮件登录
 hermes weekly-briefing doctor
 
-# 仅在体检提示缺少 PDF 依赖、且你确认后执行；依赖保存在插件数据目录
-hermes weekly-briefing runtime-install --yes
+# 首次安装和插件升级时检查版本与真实命令契约
+hermes weekly-briefing dependencies-status
+
+# 经确认后将 Agently 与隔离 PDF 依赖更新到当前稳定版，并立即复验
+hermes weekly-briefing dependencies-update --yes
 
 # 手动生成；加 --send-email 才会投递
 hermes weekly-briefing run
@@ -214,6 +217,8 @@ hermes weekly-briefing mail-login-status
 ```
 
 `mail-login-start` 会快速返回可点击的授权链接，不会把 Hermes 对话卡在一个长期等待的子进程上。若隔离运行时支持二维码，还会返回 `MEDIA:` 图片契约；Weekly Briefing 只负责生成链接/图片，微信、飞书或其他渠道如何展示由 Hermes 自己的适配器负责。二维码不可用时链接仍可完成登录。插件不会伪造登录成功；只有 `mail-login-status` 的真实身份检查通过，计划任务才允许安装。身份、登录和发送固定使用 Hermes 的持久化 Agently 工作区：`mail-status` 已通过时不会重复要求登录。
+
+依赖策略面向新版本：Agently 明确安装 npm `latest`，WeasyPrint 与 ReportLab 不设置人为的旧版上限。更新完成并不等于兼容；插件随后会实测发送参数、确认令牌、设备登录、PDF 导入与报告渲染。若最新版不满足契约，安装会明确失败并保留诊断，而不是静默降级。网络暂时无法查询版本时会标为“未知”，不会谎报已经最新。
 
 PDF 渲染依赖保存在当前 Hermes profile 的 `plugin-data/hermes-weekly-briefing/runtime/`，不会写入或污染 Hermes 核心 Python 环境；升级 Hermes 后也不会被核心依赖同步清除。
 

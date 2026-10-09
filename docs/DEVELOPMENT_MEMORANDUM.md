@@ -137,6 +137,14 @@ The portfolio pass, not a lexical score or source quota, owns `selected_ids`.
 - QR generation is optional and must never block login. The clickable authorization URL is the portable canonical path.
 - A started login must not block an agent tool call. `mail-login-start` returns promptly and `mail-login-status` performs the authoritative completion check in the same persistent Agently workspace used for sending.
 - OAuth URLs, QR files, and logs live under plugin-data with private permissions and must not be committed, copied into README examples, or confused with credentials.
+
+## Forward dependency lifecycle
+
+- Guided first install and every plugin upgrade must run `dependencies-status`; existence alone is not readiness.
+- Agently is updated explicitly from the npm `latest` tag. Compatibility is then proved against the exact commands Weekly uses: version reporting, `message +send`, body files, attachments, confirmation tokens, recipients/subjects, and verbose device login. If an authenticated workspace existed before updating, it must remain authenticated afterward.
+- Plugin-owned WeasyPrint and ReportLab are installed without artificial upper bounds. ReportLab is the required portable renderer contract and must import from the isolated runtime; WeasyPrint is additionally exercised where OS-native Pango/GTK support exists. A Windows host lacking those native libraries uses the tested ReportLab path and is not falsely marked broken.
+- A reachable registry reporting a newer version makes doctor/setup unresolved until the user authorizes `dependencies-update --yes`. Registry unavailability is recorded as unknown and must not be represented as “latest.”
+- Never silently roll dependencies back to make an old plugin implementation pass. Adapt the plugin to current releases; if that cannot be done safely, stop with an explicit incompatibility receipt and preserve user data/authentication.
 If primary and fallback model routing both fail, publication fails closed; never
 silently substitute deterministic keyword ranking.
 

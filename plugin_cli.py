@@ -139,6 +139,9 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     actions.add_parser("doctor", help="Validate configuration and delivery readiness")
     runtime = actions.add_parser("runtime-install", help="Install the declared PDF runtime dependencies")
     runtime.add_argument("--yes", action="store_true", help="Confirm installation into the active Hermes Python")
+    actions.add_parser("dependencies-status", help="Check external dependency versions and runtime contracts")
+    dependencies = actions.add_parser("dependencies-update", help="Update managed dependencies to latest and verify compatibility")
+    dependencies.add_argument("--yes", action="store_true", help="Confirm npm and isolated Python package updates")
     actions.add_parser("mail-status", help="Check Agently CLI installation and login")
     actions.add_parser("search-status", help="Probe configured academic discovery engines")
     install_mail = actions.add_parser("mail-install", help="Install the supported Agently mail CLI")
@@ -637,7 +640,58 @@ def _agently_env(config: dict | None = None) -> dict[str, str]:
     return env
 
 
-def _mail_status(probe: bool = True) -> dict:
+def _npm_latest(package: str) -> str:
+    npm = _find_npm()
+    if not npm:
+        return ""
+    try:
+        completed = subprocess.run(
+            _portable_command(npm, "view", package, "version", "--json"),
+            text=True, encoding="utf-8", errors="replace", capture_output=True,
+            timeout=20, check=False,
+        )
+        if completed.returncode:
+            return ""
+        value = json.loads(completed.stdout or '""')
+        return str(value or "").strip()
+    except Exception:
+        return ""
+
+
+def _agently_contract(cli: str) -> dict:
+    checks = {
+        "version": _portable_command(cli, "--version"),
+        "send_help": _portable_command(cli, "message", "+send", "--help"),
+        "login_help": _portable_command(cli, "auth", "login", "--help"),
+    }
+    outputs: dict[str, str] = {}
+    for name, command in checks.items():
+        try:
+            completed = subprocess.run(
+                command, text=True, encoding="utf-8", errors="replace",
+                capture_output=True, timeout=20, check=False, env=_agently_env(),
+            )
+            outputs[name] = "\n".join((completed.stdout, completed.stderr)).strip()
+            if completed.returncode:
+                return {"compatible": False, "diagnostic": f"{name} exited {completed.returncode}"}
+        except Exception as exc:
+            return {"compatible": False, "diagnostic": f"{name}: {exc}"}
+    version_match = re.search(r"(?i)version\s+([0-9]+(?:\.[0-9]+){1,3}(?:[-+][^\s]+)?)", outputs["version"])
+    if not version_match:
+        version_match = re.search(r"\b([0-9]+(?:\.[0-9]+){1,3}(?:[-+][^\s]+)?)\b", outputs["version"])
+    required_send = ("--body-file", "--attachment", "--confirmation-token", "--to", "--subject")
+    missing = [flag for flag in required_send if flag not in outputs["send_help"]]
+    if "--verbose" not in outputs["login_help"]:
+        missing.append("auth login --verbose")
+    return {
+        "compatible": not missing,
+        "installed_version": version_match.group(1) if version_match else "",
+        "missing_contracts": missing,
+        "diagnostic": "Agently send/login contract is compatible" if not missing else "missing required CLI contracts",
+    }
+
+
+def _mail_status(probe: bool = True, check_latest: bool = False) -> dict:
     cli = _find_agently_cli()
     agently_env = _agently_env()
     result = {
@@ -649,6 +703,13 @@ def _mail_status(probe: bool = True) -> dict:
     }
     if not cli or not probe:
         return result
+    contract = _agently_contract(cli)
+    result.update(contract)
+    latest = _npm_latest(result["install_package"]) if check_latest else ""
+    result["latest_version"] = latest
+    result["update_available"] = bool(
+        latest and contract.get("installed_version") and latest != contract.get("installed_version")
+    )
     try:
         check = subprocess.run(
             _portable_command(cli, "+me"), text=True, encoding="utf-8",
@@ -662,6 +723,19 @@ def _mail_status(probe: bool = True) -> dict:
     except Exception as exc:
         result["diagnostic"] = str(exc)
     return result
+
+
+def _pypi_latest(package: str) -> str:
+    try:
+        request = urllib.request.Request(
+            f"https://pypi.org/pypi/{urllib.parse.quote(package)}/json",
+            headers={"User-Agent": "HermesWeeklyBriefing/dependency-check"},
+        )
+        with urllib.request.urlopen(request, timeout=12, context=_trusted_ssl_context()) as response:
+            value = json.loads(response.read().decode("utf-8", errors="replace"))
+        return str((value.get("info") or {}).get("version") or "").strip()
+    except Exception:
+        return ""
 
 
 def _mail_login_dir() -> Path:
@@ -767,6 +841,12 @@ def _start_mail_login(wait_seconds: float = 12.0) -> tuple[int, dict]:
             **current,
             "status": "missing_cli",
             "next_action": "Run mail-install --yes first.",
+        }
+    if current.get("compatible") is False:
+        return 2, {
+            **current,
+            "status": "incompatible_cli",
+            "next_action": "Run dependencies-update --yes before starting login.",
         }
     if current.get("authenticated"):
         return 0, {**current, "status": "authenticated", "next_action": "No login is needed."}
@@ -884,10 +964,11 @@ def _model_status(config: dict) -> dict:
         return {"ready": False, "diagnostic": str(exc)}
 
 
-def _renderer_status() -> dict:
+def _renderer_status(check_latest: bool = False) -> dict:
     runtime = _runtime_path()
     probe = f"""
 import importlib
+import importlib.metadata
 import json
 import sys
 from pathlib import Path
@@ -903,6 +984,7 @@ for name in ("weasyprint", "reportlab"):
             "available": True,
             "isolated": origin == runtime or runtime in origin.parents,
             "origin": str(origin),
+            "version": importlib.metadata.version(name),
         }}
     except Exception as exc:
         result[name] = {{"available": False, "isolated": False, "error": str(exc)}}
@@ -928,8 +1010,27 @@ print(json.dumps(result))
         and result[name].get("available") is True
         and result[name].get("isolated") is not True
     ]
+    versions = {
+        name: str(value.get("version") or "")
+        for name, value in result.items()
+        if isinstance(value, dict) and value.get("isolated") is True
+    }
+    latest_versions = {
+        name: _pypi_latest(name) for name in ("weasyprint", "reportlab")
+    } if check_latest else {}
+    updates = {
+        name: {"installed": version, "latest": latest_versions.get(name, "")}
+        for name, version in versions.items()
+        if latest_versions.get(name) and latest_versions[name] != version
+    }
+    # ReportLab is the portable renderer contract on Windows/WSL/Linux/Docker.
+    # WeasyPrint is installed at its current release too, but native GTK/Pango
+    # availability is an OS capability rather than a Python package version;
+    # its import failure must not make a healthy ReportLab fallback unusable.
+    complete = "reportlab" in isolated
     return {
         "ready": bool(isolated),
+        "complete": complete,
         "available": isolated,
         "host_available": host_available,
         "origins": {
@@ -937,6 +1038,11 @@ print(json.dumps(result))
             for name, value in result.items()
             if isinstance(value, dict) and value.get("origin")
         },
+        "versions": versions,
+        "latest_versions": latest_versions,
+        "update_available": updates,
+        "required_renderer": "reportlab",
+        "optional_renderer": "weasyprint",
         "runtime": str(runtime),
         "isolated": bool(isolated),
         "diagnostic": (
@@ -946,11 +1052,14 @@ print(json.dumps(result))
     }
 
 
-def _install_runtime(confirmed: bool) -> int:
+def _install_runtime(confirmed: bool, emit: bool = True) -> int:
     if not confirmed:
         print("Refusing to install the plugin runtime without --yes", file=sys.stderr)
         return 2
-    packages = ["weasyprint>=62,<70", "reportlab>=4,<5"]
+    # Deliberately install current releases without upper caps. Compatibility
+    # is established by the renderer contract and full plugin acceptance, not
+    # by freezing users on an old major version.
+    packages = ["weasyprint", "reportlab"]
     runtime = _runtime_path()
     runtime.mkdir(parents=True, exist_ok=True)
     if importlib.util.find_spec("pip") is not None:
@@ -967,7 +1076,82 @@ def _install_runtime(confirmed: bool) -> int:
             uv, "pip", "install", "--python", sys.executable,
             "--upgrade", "--target", str(runtime), *packages
         )
-    return subprocess.run(command).returncode
+    completed = subprocess.run(command)
+    if completed.returncode:
+        return completed.returncode
+    status = _renderer_status(check_latest=True)
+    status["operation"] = "runtime_update"
+    if emit:
+        print(json.dumps(status, ensure_ascii=False, indent=2))
+    return 0 if status.get("complete") and not status.get("update_available") else 2
+
+
+def _install_mail(confirmed: bool, emit: bool = True) -> int:
+    if not confirmed:
+        print("Refusing a global install without --yes", file=sys.stderr)
+        return 2
+    npm = _find_npm()
+    if not npm:
+        print(
+            "npm is required to install @tencent-qqmail/agently-cli; "
+            "install a supported Node.js LTS package, restart the shell, and retry",
+            file=sys.stderr,
+        )
+        return 2
+    before = _mail_status(probe=True, check_latest=False)
+    completed = subprocess.run(_portable_command(
+        npm, "install", "--global", "@tencent-qqmail/agently-cli@latest"
+    ))
+    if completed.returncode:
+        return completed.returncode
+    after = _mail_status(probe=True, check_latest=True)
+    preserved_auth = not before.get("authenticated") or bool(after.get("authenticated"))
+    result = {
+        "operation": "agently_update",
+        "before_version": str(before.get("installed_version") or ""),
+        "installed_version": str(after.get("installed_version") or ""),
+        "latest_version": str(after.get("latest_version") or ""),
+        "compatible": bool(after.get("compatible")),
+        "authentication_preserved": preserved_auth,
+        "authenticated": bool(after.get("authenticated")),
+        "workspace": after.get("workspace"),
+        "update_available": bool(after.get("update_available")),
+        "diagnostic": after.get("diagnostic"),
+    }
+    if emit:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["compatible"] and preserved_auth and not result["update_available"] else 2
+
+
+def _dependencies_status() -> dict:
+    mail = _mail_status(probe=True, check_latest=True)
+    runtime = _renderer_status(check_latest=True)
+    errors = []
+    if not mail.get("installed"):
+        errors.append("Agently CLI is not installed")
+    elif mail.get("compatible") is False:
+        errors.append("installed Agently CLI does not satisfy the current send/login contract")
+    if mail.get("update_available"):
+        errors.append("Agently CLI update is available")
+    if not runtime.get("complete"):
+        errors.append("plugin-owned PDF runtime is not installed")
+    elif runtime.get("update_available"):
+        errors.append("plugin-owned PDF runtime updates are available")
+    return {"ok": not errors, "errors": errors, "mail": mail, "runtime": runtime}
+
+
+def _update_dependencies(confirmed: bool) -> int:
+    if not confirmed:
+        print("Refusing dependency updates without --yes", file=sys.stderr)
+        return 2
+    runtime_code = _install_runtime(True, emit=False)
+    mail_code = _install_mail(True, emit=False)
+    result = _dependencies_status()
+    result["operation"] = "dependencies_update"
+    result["runtime_exit_code"] = runtime_code
+    result["mail_exit_code"] = mail_code
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if runtime_code == 0 and mail_code == 0 and result["ok"] else 2
 
 
 def _profile_timezone() -> str:
@@ -994,21 +1178,27 @@ def _profile_timezone() -> str:
 def _doctor_result() -> dict:
     config = _load_config()
     errors = _config_diagnostics() + (_personalization_errors(config) if config else [])
-    mail = _mail_status()
+    mail = _mail_status(check_latest=True)
     model = _model_status(config) if config else {"ready": False, "diagnostic": "configuration missing"}
-    renderer = _renderer_status()
+    renderer = _renderer_status(check_latest=True)
     search = _search_status(config) if config else {"ok": False, "configured_sources": [], "ready_sources": [], "engines": []}
     schedule_cfg = config.get("schedule") if isinstance(config.get("schedule"), dict) else {}
     requested_timezone = str(schedule_cfg.get("timezone") or "").strip()
     profile_timezone = _profile_timezone()
     if not mail["installed"]:
         errors.append("Agently CLI is not installed")
+    elif mail.get("compatible") is False:
+        errors.append("Agently CLI is incompatible with the current Weekly Briefing contract")
+    elif mail.get("update_available"):
+        errors.append("Agently CLI update is available; run dependencies-update --yes")
     elif not mail["authenticated"]:
         errors.append("Agently CLI login is required")
     if not model["ready"]:
         errors.append("analysis provider is not ready")
-    if not renderer["ready"]:
+    if not renderer.get("complete"):
         errors.append("plugin-owned PDF renderer is not installed")
+    elif renderer.get("update_available"):
+        errors.append("plugin-owned PDF runtime updates are available; run dependencies-update --yes")
     if not search["ok"]:
         errors.append("no configured academic search engine is reachable")
     if requested_timezone and requested_timezone != profile_timezone:
@@ -1030,7 +1220,8 @@ def _setup_status() -> dict:
     config = _load_config()
     config_errors = _config_diagnostics()
     personalization_errors = _personalization_errors(config) if config else []
-    mail = _mail_status()
+    mail = _mail_status(check_latest=True)
+    renderer = _renderer_status(check_latest=True)
     search = _search_status(config) if config else {
         "ok": False,
         "configured_sources": [],
@@ -1041,9 +1232,17 @@ def _setup_status() -> dict:
     unresolved = []
     if config_errors or personalization_errors:
         unresolved.append("personal_preferences")
-    if not mail["installed"]:
-        unresolved.append("agently_install")
-    elif not mail["authenticated"]:
+    dependency_install = not mail["installed"] or not renderer.get("complete")
+    dependency_update = bool(
+        mail.get("update_available")
+        or mail.get("compatible") is False
+        or renderer.get("update_available")
+    )
+    if dependency_install:
+        unresolved.append("dependencies_install")
+    elif dependency_update:
+        unresolved.append("dependencies_update")
+    if mail["installed"] and not mail["authenticated"]:
         unresolved.append("agently_login")
     if not search["ok"]:
         unresolved.append("academic_search")
@@ -1052,12 +1251,15 @@ def _setup_status() -> dict:
         "configured": bool(config) and not config_errors,
         "unresolved": unresolved,
         "mail": mail,
+        "runtime": renderer,
         "academic_search": search,
         "next_action": (
             "ask the user for research topics, recipient email, preferred form of address, Hermes sign-off, schedule/timezone and optional model preferences"
             if "personal_preferences" in unresolved else
-            "ask permission, then run mail-install --yes"
-            if "agently_install" in unresolved else
+            "ask permission, then run dependencies-update --yes to install current Agently and PDF dependencies"
+            if "dependencies_install" in unresolved else
+            "ask permission, then run dependencies-update --yes and re-run doctor"
+            if "dependencies_update" in unresolved else
             "run mail-login-start, present verification_url (and media_directive when present) through the current Hermes channel, then poll mail-login-status"
             if "agently_login" in unresolved else
             search["next_action"]
@@ -1334,28 +1536,27 @@ def weekly_briefing_command(args: argparse.Namespace) -> int:
         return 0 if result["ok"] else 2
     if action == "runtime-install":
         return _install_runtime(args.yes)
-    if action == "mail-status":
-        result = _mail_status()
+    if action == "dependencies-status":
+        result = _dependencies_status()
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result["installed"] and result["authenticated"] else 2
+        return 0 if result["ok"] else 2
+    if action == "dependencies-update":
+        return _update_dependencies(args.yes)
+    if action == "mail-status":
+        result = _mail_status(check_latest=True)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if (
+            result["installed"]
+            and result["authenticated"]
+            and result.get("compatible") is not False
+            and not result.get("update_available")
+        ) else 2
     if action == "search-status":
         result = _search_status(_load_config())
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["ok"] else 2
     if action == "mail-install":
-        if not args.yes:
-            print("Refusing a global install without --yes", file=sys.stderr)
-            return 2
-        npm = _find_npm()
-        if not npm:
-            print(
-                "npm is required to install @tencent-qqmail/agently-cli; "
-                "install a supported Node.js LTS package, restart the shell, and retry",
-                file=sys.stderr,
-            )
-            return 2
-        result = subprocess.run(_portable_command(npm, "install", "--global", "@tencent-qqmail/agently-cli"))
-        return result.returncode
+        return _install_mail(args.yes)
     if action in {"mail-login", "mail-login-start"}:
         code, result = _start_mail_login()
         print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -1,7 +1,7 @@
 ---
 name: weekly-briefing-v2
 description: 安装、个性化配置、运行并通过邮件交付研究论文周报；包含作者团队调研、可点击原文链接和中文 PDF。
-version: 5.2.0
+version: 5.3.0
 related_skills:
   - academic-weekly-briefing-core
   - academic-report-render-deliver
@@ -30,14 +30,19 @@ related_skills:
    不得展示、暗示或推荐作者自己的研究词；只能记录用户主动给出的方向。
 4. 使用 `hermes weekly-briefing setup` 的对应参数写入设置。不要要求用户手写 JSON。
 5. 运行 `search-status` 实测学术发现来源；若全部不可用，必须引导用户选择支持的来源并配置网络出口或相应 API Key 环境变量，不能继续安装计划任务。OpenAlex 生产使用应引导用户在 `https://openalex.org/settings/api` 免费获取 key，插件只保存变量名。
-6. 检查 PDF 运行依赖。若 `doctor` 报告缺失，说明将在插件自己的持久化数据目录安装隔离依赖，获得同意后运行 `runtime-install --yes`，再重新体检。不得把这些依赖装进 Hermes 核心虚拟环境。
-7. 检查 Agently：
-   - 未安装时，说明将全局安装 `@tencent-qqmail/agently-cli`，获得同意后运行 `mail-install --yes`；
+6. 每次首次安装或插件升级都运行 `dependencies-status`，不能只判断依赖“存在”：
+   - 检查 Agently 已安装版本、npm `latest`、`message +send`/确认令牌/设备登录等真实命令契约；
+   - 检查插件自有 PDF 运行时的 WeasyPrint、ReportLab 版本与 PyPI 当前稳定版；ReportLab 是跨平台必需渲染契约，WeasyPrint 还依赖操作系统原生图形库，缺少该原生能力时应明确标为可选不可用并使用 ReportLab，不得把 Windows 正常回退误判为整体失败；
+   - 缺失、落后或契约不兼容时，说明会更新全局 Agently 和插件隔离 PDF 依赖，获得同意后运行 `dependencies-update --yes`；更新后必须再次运行 `dependencies-status` 和 `doctor`；
+   - 依赖使用当前稳定版，不因旧插件版本人为设置上限。若最新版破坏当前契约，必须明确停止并报告，不得静默降级到旧依赖；
+   - PDF 包只能安装在插件自己的持久化数据目录，禁止写入 Hermes 核心 Python 环境。
+7. 检查 Agently 登录：
    - 未登录时运行 `mail-login-start`；把返回的 `verification_url` 作为可点击链接呈现给用户。若返回 `media_directive`，须在同一回复中原样单独输出 `MEDIA:/absolute/path.png`，由当前 Hermes 平台适配器负责发送二维码；没有二维码不影响登录；
    - 命令行会话同样显示登录链接；用户授权后运行 `mail-login-status`。未通过真实身份检查前不得声称成功；
    - 绝不要求用户把密码、令牌、Cookie 或 OAuth 验证码发到聊天中；
    - 用户完成交互后运行 `mail-status`，不能仅凭用户按了 Enter 就声称登录成功。
    - 所有身份检查、登录与发送必须使用同一个持久化 `AGENTLY_WORKSPACE`（默认 `hermes`）；正确工作区已通过身份检查时，禁止重复要求用户登录。
+   - 更新 Agently 前后若原工作区已经登录，必须验证授权仍然有效；授权丢失视为更新失败，不得悄悄要求用户重新登录。
    - 容器环境必须使用 gateway 的运行用户执行插件命令；禁止用 `root` 刷新普通运行用户的凭据，否则会造成凭据文件属主变化和假性“登录失效”。
 8. 运行 `doctor`。失败时只处理仍未通过的项目，不重复已完成的登录或配置。
 9. 先运行一次不发送的测试；需要发送测试邮件时必须得到用户明确同意。

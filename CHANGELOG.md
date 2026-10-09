@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.3.0 - 2026-10-09
+
+- Add a dependency lifecycle that compares installed Agently/PDF components with current npm/PyPI stable releases on every guided install or plugin upgrade.
+- Update Agently explicitly from npm `latest`, then verify the real send, confirmation-token and OAuth-login command contracts while preserving an existing authenticated workspace.
+- Remove artificial upper-version caps from the plugin-owned WeasyPrint and ReportLab runtime, update both to current releases, and require post-update import/render compatibility instead of silently pinning old majors.
+- Add `dependencies-status` and `dependencies-update --yes`; known outdated or incompatible dependencies now block readiness with an actionable diagnostic, while an unreachable registry remains an honest unknown rather than a false claim.
+
 ## 5.2.0 - 2026-10-09
 
 - Restore model-authored, per-issue salutations and Hermes sign-offs without hardcoding a particular user's identity; configured base names are retained and decorated, while unconfigured installs receive safe Hermes-authored identities.
