@@ -1,5 +1,5 @@
 name: hermes-weekly-briefing
-version: 5.3.2
+version: 5.3.1
 manifest_version: 1
 api_version: 1
 description: Research discovery, author-team context, polished PDF rendering, and email-only delivery.
@@ -7,7 +7,7 @@ author: Awenforever
 license: MIT
 homepage: https://github.com/Awenforever/hermes-weekly-briefing
 tags: [research, weekly-report, pdf, email]
-requires_hermes: ">=0.22,<0.23"
+requires_hermes: ">=0.21.3,<0.22"
 config_schema:
   max_selected:
     type: int
